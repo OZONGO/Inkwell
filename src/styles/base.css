@@ -1,0 +1,86 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus,
+button:focus-visible,
+input:focus,
+input:focus-visible {
+  outline: none;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* mono utility for metadata — the carbon-copy slip */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* theme toggle — circular reveal from the button (View Transitions API) */
+:root {
+  --reveal-x: 50%;
+  --reveal-y: 50%;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  animation: theme-reveal 0.45s var(--ease-out);
+}
+@keyframes theme-reveal {
+  from {
+    clip-path: circle(0% at var(--reveal-x) var(--reveal-y));
+  }
+  to {
+    clip-path: circle(150% at var(--reveal-x) var(--reveal-y));
+  }
+}
