@@ -62,17 +62,32 @@ export default function App() {
     }
   }
 
-  // 每次面板打开，重置到最新卡片（最前 = 最新）
+  // 每次面板打开，重置到最新卡片（最前 = 最新）；聚焦 DOM 使键盘立即生效
   useEffect(() => {
     if (!isTauri()) return;
     const un = listen("panel-shown", () => {
       setActiveByPane({ clipboard: 0, phrases: 0 });
       setView("stack");
       setQuery("");
+      // 立即聚焦 + 下一帧再试，覆盖 Alt 键弹起时 WebView2 的焦点抢占
+      const root = document.getElementById("root");
+      const focusRoot = () => root?.focus({ preventScroll: true });
+      focusRoot();
+      requestAnimationFrame(focusRoot);
     });
     return () => {
       un.then((f) => f());
     };
+  }, []);
+
+  // 点击面板外部或切窗口时自动隐藏
+  useEffect(() => {
+    if (!isTauri()) return;
+    const win = getCurrentWindow();
+    const un = win.listen("tauri://blur", () => {
+      win.hide();
+    });
+    return () => { un.then((f) => f()); };
   }, []);
 
   function paste(item: ClipItem) {
@@ -110,6 +125,11 @@ export default function App() {
         }
         return;
       }
+      // 阻止 Alt 键激活 WebView2 菜单导航模式（否则焦点丢失，滚动/键盘失效）
+      if (e.key === "Alt") {
+        e.preventDefault();
+        return;
+      }
       if (searching) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -126,8 +146,18 @@ export default function App() {
         setPane((p) => (p === "clipboard" ? "phrases" : "clipboard"));
       }
     }
+    // Alt 弹起时重新聚焦，弥补被 WebView2 菜单模式吞掉的焦点
+    function onAltUp(e: KeyboardEvent) {
+      if (e.key === "Alt") {
+        document.getElementById("root")?.focus({ preventScroll: true });
+      }
+    }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onAltUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onAltUp);
+    };
   }, [searching, active, items, pane]);
 
   const searchResults = useMemo(() => {
