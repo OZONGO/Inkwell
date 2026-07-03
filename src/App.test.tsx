@@ -25,7 +25,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 // framer-motion 在 jsdom 下需要降级以避免动画相关 API 缺失
 vi.mock("framer-motion", () => ({
-  motion: new Proxy({}, { get: () => "div" }),
+  motion: new Proxy(
+    {},
+    { get: (_, prop) => (prop === "input" ? "input" : "div") },
+  ),
   AnimatePresence: ({ children }: { children: React.ReactNode }) => (
     <>{children}</>
   ),
@@ -104,7 +107,7 @@ describe("App", () => {
     render(<App />);
     // 进入搜索视图：TopBar 的搜索按钮 — 这里通过点击 toggle 模拟
     // 由于 TopBar 内部结构，直接点击搜索图标
-    const searchBtn = screen.getByLabelText(/search/i) as HTMLButtonElement;
+    const searchBtn = screen.getByLabelText(/搜索/) as HTMLButtonElement;
     if (searchBtn) {
       fireEvent.click(searchBtn);
     }
