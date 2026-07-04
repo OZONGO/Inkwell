@@ -1,110 +1,98 @@
 # 剪贴板 · Clipboard
 
-> Windows 本地剪贴板工具——托盘常驻、Alt+V 呼出浮动面板，展示剪贴板历史与常用语，支持搜索与主题切换。
+Windows 上的一个本地剪贴板小工具。托盘常驻，按 Alt+V 呼出一个浮动面板，展示剪贴板历史跟常用语，支持搜索和主题切换。
 
-## 特性
+## 长什么样
 
-- **堆叠式卡片浏览**：剪贴板内容像手机后台卡片一样堆叠展示，滚轮/方向键翻动，一键粘贴
-- **常用语**：常用文本片段独立管理，支持新建、修改、删除、拖拽排序
-- **实时搜索**：点击搜索按钮展开成搜索栏，实时过滤剪贴板历史（仅文本，子串匹配）
-- **图片支持**：图片复制后存缩略图预览 + 原图/路径用于粘贴（文件型图片还原 HDROP）
-- **两套主题**：默认跟随系统，可手动切换浅色/深色，带圆形扩散过渡动画
-- **极简扁平 + 微动效**：Framer Motion 物理弹簧动效，层次靠缩放/偏移/投影而非透明度
-- **去重与自动淘汰**：相同内容提到栈顶不重复；保留最近 50 条（可配置），超出自动移除最旧
-- **真实后端**：基于 `AddClipboardFormatListener` 的剪贴板监听 + SQLite 持久化 + blake3 图片去重落盘
+面板大概这么个意思：
+
+- 剪贴板内容像手机后台卡片一样堆叠着，滚轮或方向键翻动，点一下或者按 Enter 就直接粘贴
+- 常用语单独管理，可以新建、修改、删除，还能拖拽排序
+- 顶部有搜索按钮，点开变成搜索栏，实时过滤剪贴板历史（只搜文本，子串匹配）
+- 图片也能存，复制后存一份缩略图预览 + 原图路径用于粘贴，文件型的图片还原成 HDROP
+- 两套主题，默认跟系统走，也可以手动切浅色/深色，切换时带个圆形扩散动画
+- 动效方面用了 Framer Motion，物理弹簧那种手感，层次靠缩放和偏移来体现，没用透明度
+
+## 粘贴到底怎么工作的
+
+这是最折腾的部分：
+
+1. 面板打开的时候后台线程一直在记录"当前用户到底在哪个窗口打字"
+2. 你点粘贴 → 面板先隐藏，让系统把前台还给原来的窗口
+3. 轮询等那个窗口成为前台，最多等 200ms
+4. 如果没等到，用 `AttachThreadInput` 附加到当前前台线程拿权限，再 `SetForegroundWindow` 硬设
+5. 最后 `SendInput` 模拟 Ctrl+V
+
+Shift + Enter 粘贴的话面板不关，可以连续贴。
+
+图片粘贴分两种情况：文件型（资源管理器复制的那种）走 CF_HDROP，截图型走 CF_DIB。
+
+## 后端干了啥
+
+- 剪贴板监听不走轮询，用的 `AddClipboardFormatListener`，事件驱动
+- 监听到变化先读文本，非空就去重后写 SQLite，相同内容提到栈顶
+- 文本不行就试 CF_DIB 图片，blake3 哈希去重，原图存 PNG，缩略图 256px JPEG
+- 保留最近 N 条（默认 50，可配），超出自动淘汰最旧
+- 自粘贴抑制：自己贴的内容 500ms 内不会被再监听到
 
 ## 技术栈
 
-| 层级 | 技术 |
-|---|---|
-| 桌面壳 | [Tauri 2](https://v2.tauri.app) + Rust |
-| 前端 | React 19 + TypeScript + Vite |
-| 动效 | Framer Motion |
-| 字体 | IBM Plex Sans / Mono / SC（碳素副本记号）|
-| 配色 | 墨与纸（双主题，ballpoint ink 强调色）|
+- 桌面壳：Tauri 2 + Rust
+- 前端：React 19 + TypeScript + Vite
+- 动效：Framer Motion
+- 字体：IBM Plex Sans / Mono / SC
+- 配色：墨与纸双主题
+- 数据：SQLite（rusqlite bundled）
+- 图片：image crate + blake3
 
-## 环境准备
-
-1. **Node.js** ≥ 20（已装）
-2. **Rust** — [rustup.rs](https://rustup.rs)，选 `x86_64-pc-windows-msvc`
-3. **VS 2022 Build Tools** — 勾选「使用 C++ 的桌面开发」
-4. **WebView2** — Win10 19045+ 已自带
-
-> ⚠️ 国内网络：`~/.cargo/config.toml` 建议配置 USTC 镜像：
-> ```
-> [source.crates-io]
-> replace-with = "ustc"
-> [source.ustc]
-> registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
-> ```
-
-## 快速开始
+## 跑起来
 
 ```bash
 cd app
-
-# 安装前端依赖
 npm install
-
-# 前端开发（仅浏览器，不启动窗口）
-npm run dev
-
-# 完整 Tauri 开发（vite + Rust 编译 + 窗口）
 npm run tauri dev
 ```
 
-浏览器访问 `http://localhost:1420` 可迭代前端视觉；Tauri 启动后按 **Alt+V** 呼出面板。
+环境要求：Node.js ≥ 20、Rust（msvc 工具链）、VS 2022 Build Tools（C++ 桌面开发）、WebView2（Win10 19045+ 自带）。
+
+## 快捷键
+
+| 按键 | 作用 |
+|---|---|
+| Alt+V | 开/关面板 |
+| ↑/↓ 或滚轮 | 翻卡片 |
+| Enter / 左键 | 粘贴当前卡片 |
+| Shift+Enter | 粘贴但不关面板 |
+| Tab | 切 剪贴板/常用语 |
+| Alt+C | 展开搜索 |
+| Esc | 关搜索 / 关面板 |
 
 ## 项目结构
 
 ```
 app/
-├── src/                  # 前端 React
-│   ├── components/       # Panel / TopBar / Card / CardStack / SearchView
-│   │                   # PhraseGrid / PhraseEditModal / ContextMenu / SettingsApp
-│   ├── lib/              # useTheme / tauri(IPC 封装) / types / motion
-│   ├── data/             # mock.ts（测试用 mock 数据） / formatTime 工具函数
-│   ├── styles/           # tokens(配色/字号) / base(重置/主题动画) / panel(面板/卡片/搜索)
-│   └── App.tsx           # 顶层状态机（通过 Tauri IPC 调用后端）
-├── src-tauri/            # Rust 后端
-│   ├── src/lib.rs        # 单实例 / 全局热键 / 托盘 / toggle_panel
-│   ├── src/clipboard_listener.rs  # AddClipboardFormatListener 监听
-│   ├── src/db.rs         # SQLite 读写（剪贴板 / 常用语 / 设置）
-│   ├── src/image_store.rs         # 图片 blake3 去重落盘 + 预览
-│   ├── src/paste.rs      # AttachThreadInput + SetForegroundWindow 回切粘贴
-│   ├── src/commands.rs   # Tauri IPC 命令注册
-│   ├── src/settings.rs   # 设置读写 + 热键注册
-│   ├── src/state.rs      # AppState 共享状态
-│   ├── tauri.conf.json   # 无边框透明窗口 / bundle 配置
-│   └── capabilities/     # 窗口 / 事件权限
-├── docs/                 # 设计文档（灵感.md / 设计决策.md）
-├── public/               # 图标
-└── package.json
+├── src/                   # React 前端
+│   ├── components/        # 各种组件
+│   ├── lib/               # 主题 / IPC / 类型 / 动效
+│   ├── data/              # mock 数据和工具函数
+│   ├── styles/            # CSS
+│   └── App.tsx            # 主状态机
+├── src-tauri/             # Rust 后端
+│   ├── src/
+│   │   ├── lib.rs                # 入口：托盘、热键、初始化
+│   │   ├── clipboard_listener.rs # 剪贴板监听
+│   │   ├── db.rs                 # SQLite 读写
+│   │   ├── image_store.rs        # 图片处理
+│   │   ├── paste.rs              # 粘贴回切逻辑
+│   │   ├── foreground_tracker.rs # 前台窗口追踪
+│   │   ├── commands.rs           # IPC 命令
+│   │   └── settings.rs           # 设置读写
+│   └── tauri.conf.json
+└── docs/                  # 设计文档
 ```
 
-## 交互操作
+## 当前完成度
 
-| 按键 | 操作 |
-|---|---|
-| Alt+V | 呼出/隐藏面板 |
-| ↓ / ↑ 或 滚轮 | 翻动堆叠卡片 |
-| Enter / 左键点击 | 粘贴当前卡片（剪贴板自动置顶） |
-| Tab | 切换 剪贴板 / 常用语 |
-| Alt+C / 点搜索图标 | 展开搜索栏 |
-| Esc | 关搜索 / 关面板 |
-| 主题按钮 | 切换 light/dark（圆形扩散）|
+该有的基本都有了：托盘、热键、剪贴板监听、图片支持、常用语、搜索、双主题、设置窗口、开机自启、单实例。单元测试前后端加起来 31 个。
 
-## 设计源真值
-
-产品决策以 **[docs/设计决策.md](docs/设计决策.md)** 为准（由 `/grill-me` 访谈敲定）。原始灵感见 [docs/灵感.md](docs/灵感.md)。
-
-## 当前状态
-
-- ✅ 已完成：面板壳、托盘、热键、Alt+V 呼出、主题动画、堆叠+搜索前端
-- ✅ 已完成：剪贴板监听（`AddClipboardFormatListener` 事件驱动）
-- ✅ 已完成：SQLite 持久化 + blake3 图片去重 + 原图/预览落盘 + HDROP 还原
-- ✅ 已完成：粘贴回切（`AttachThreadInput` + `SetForegroundWindow` + `SendInput` Ctrl+V）
-- ✅ 已完成：常用语网格排序（拖拽磁力让位 + 弹簧吸附）、新建/修改/删除
-- ✅ 已完成：独立设置窗口（热键自定义 / 最大条数 / 主题 / 开机自启）
-- ✅ 已完成：单元测试覆盖核心模块（24 用例全部通过）
-- 🚧 待铺：托盘自定义菜单、剪贴板历史白名单过滤
+还有一些想加的东西没加进去：托盘自定义菜单、剪贴板白名单过滤。再说吧。
