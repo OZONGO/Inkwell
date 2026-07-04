@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { formatTime } from "./mock";
+import { formatTime } from "../lib/format";
 
 describe("formatTime", () => {
   beforeEach(() => {

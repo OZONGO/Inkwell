@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import type { ClipItem } from "../lib/types";
-import { formatTime } from "../data/mock";
+import { formatTime } from "../lib/format";
 
 interface Props {
   items: ClipItem[];

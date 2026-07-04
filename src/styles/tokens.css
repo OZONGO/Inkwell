@@ -57,3 +57,32 @@
   --peek-opacity: 0.46;
   --backdrop: rgba(0, 0, 0, 0.30);
 }
+
+/* 强调色预设：通过 data-accent 属性覆盖主题默认 --accent / --accent-soft。
+   蓝色为主题默认值，无需显式规则；green/orple/red 分别为浅色与深色主题定义变体。 */
+:root[data-theme="light"][data-accent="green"] {
+  --accent: #2e7d4f;
+  --accent-soft: #e3f0e8;
+}
+:root[data-theme="dark"][data-accent="green"] {
+  --accent: #5fae7a;
+  --accent-soft: #1f3a2a;
+}
+
+:root[data-theme="light"][data-accent="orple"] {
+  --accent: #6b4c8a;
+  --accent-soft: #ede3f4;
+}
+:root[data-theme="dark"][data-accent="orple"] {
+  --accent: #a78bc4;
+  --accent-soft: #2a1f3a;
+}
+
+:root[data-theme="light"][data-accent="red"] {
+  --accent: #a83a3a;
+  --accent-soft: #f4e3e3;
+}
+:root[data-theme="dark"][data-accent="red"] {
+  --accent: #d27474;
+  --accent-soft: #3a1f1f;
+}

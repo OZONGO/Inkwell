@@ -5,12 +5,28 @@ import App from "./App";
 // 注意：此测试需要 jsdom 环境 + @testing-library/react + @testing-library/jest-dom
 // 并需 mock 以下 Tauri 模块（它们在 jsdom 中不可用）：
 //   - @tauri-apps/api/window (getCurrentWindow)
-//   - @tauri-apps/api/core (isTauri)
+//   - @tauri-apps/api/core (isTauri, invoke)
 //   - @tauri-apps/api/event (listen)
 
-vi.mock("@tauri-apps/api/core", () => ({
-  isTauri: () => false, // 非 Tauri 环境，跳过原生窗口逻辑
-}));
+vi.mock("@tauri-apps/api/core", async () => {
+  const { mockClipboard, mockPhrases } = await import("./data/mock");
+  const invokeMock = vi.fn((cmd: string, args?: Record<string, unknown>) => {
+    switch (cmd) {
+      case "list_clipboard": return Promise.resolve(mockClipboard);
+      case "list_phrases": return Promise.resolve(mockPhrases);
+      case "paste_item": return Promise.resolve();
+      case "delete_clipboard_item": return Promise.resolve();
+      case "search_clipboard": return Promise.resolve(mockClipboard);
+      case "new_phrase": return Promise.resolve({ id: "new", type: "text", text: (args?.text as string) ?? "", time: Date.now() });
+      case "edit_phrase": return Promise.resolve();
+      case "delete_phrase": return Promise.resolve();
+      case "move_phrase_to_first": return Promise.resolve();
+      case "get_settings": return Promise.resolve({ theme: "follow", accent: "blue" });
+      default: return Promise.resolve();
+    }
+  });
+  return { isTauri: () => true, invoke: invokeMock };
+});
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
@@ -34,6 +50,14 @@ vi.mock("framer-motion", () => ({
   ),
 }));
 
+// 刷新 mount effect 中 IPC Promise 的微任务，使 setClip/setPhrases 生效
+async function flushIPC() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe("App", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -46,22 +70,25 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
-  test("renders clipboard panel with footer count", () => {
+  test("renders clipboard panel with footer count", async () => {
     render(<App />);
+    await flushIPC();
     // mock.ts 中 mockClipboard 有 6 条
     expect(screen.getByText(/6 条 · Tab 常用语/)).toBeTruthy();
   });
 
-  test("Tab key switches pane to phrases and updates footer", () => {
+  test("Tab key switches pane to phrases and updates footer", async () => {
     render(<App />);
+    await flushIPC();
     const root = document.getElementById("root") as HTMLElement;
     fireEvent.keyDown(window, { key: "Tab" });
     // mock.ts 中 mockPhrases 有 4 条
     expect(screen.getByText(/4 条 · Tab 剪贴板/)).toBeTruthy();
   });
 
-  test("ArrowDown moves active card highlight", () => {
+  test("ArrowDown moves active card highlight", async () => {
     render(<App />);
+    await flushIPC();
     // 按 ArrowDown 不应报错，且 active 索引应推进
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowDown" });
@@ -69,15 +96,17 @@ describe("App", () => {
     expect(screen.getByText(/6 条 · Tab 常用语/)).toBeTruthy();
   });
 
-  test("ArrowUp at index 0 clamps to 0 (no negative)", () => {
+  test("ArrowUp at index 0 clamps to 0 (no negative)", async () => {
     render(<App />);
+    await flushIPC();
     fireEvent.keyDown(window, { key: "ArrowUp" });
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(screen.getByText(/6 条 · Tab 常用语/)).toBeTruthy();
   });
 
-  test("Enter on active clipboard item triggers paste flash", () => {
+  test("Enter on active clipboard item triggers paste flash", async () => {
     render(<App />);
+    await flushIPC();
     fireEvent.keyDown(window, { key: "Enter" });
     // flash 文本"已粘贴 · ..."
     act(() => {
@@ -86,8 +115,9 @@ describe("App", () => {
     expect(screen.getByText(/已粘贴 ·/)).toBeTruthy();
   });
 
-  test("Enter on image item shows '图片' label", () => {
+  test("Enter on image item shows '图片' label", async () => {
     render(<App />);
+    await flushIPC();
     // mockClipboard[3] 是 image 类型；连续 ArrowDown 三次到达
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowDown" });
@@ -96,15 +126,17 @@ describe("App", () => {
     expect(screen.getByText(/已粘贴 · 图片/)).toBeTruthy();
   });
 
-  test("Escape in stack view does not crash (no Tauri hide in test env)", () => {
+  test("Escape in stack view does not crash (no Tauri hide in test env)", async () => {
     render(<App />);
+    await flushIPC();
     fireEvent.keyDown(window, { key: "Escape" });
     // 仍在 clipboard 视图
     expect(screen.getByText(/6 条 · Tab 常用语/)).toBeTruthy();
   });
 
-  test("search filters clipboard by query (case-insensitive)", () => {
+  test("search filters clipboard by query (case-insensitive)", async () => {
     render(<App />);
+    await flushIPC();
     // 进入搜索视图：TopBar 的搜索按钮 — 这里通过点击 toggle 模拟
     // 由于 TopBar 内部结构，直接点击搜索图标
     const searchBtn = screen.getByLabelText(/搜索/) as HTMLButtonElement;

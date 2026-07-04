@@ -1,0 +1,248 @@
+/* 设置窗口 — 复用 base.css 的 token 体系 */
+
+.settings-root {
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-loading {
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--graphite);
+  font-size: 13px;
+}
+
+.settings-header {
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--graphite) 35%, transparent) transparent;
+}
+.settings-body::-webkit-scrollbar {
+  width: 6px;
+}
+.settings-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--graphite) 35%, transparent);
+  border-radius: 3px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.settings-section-title {
+  margin: 0 0 var(--sp-1);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--graphite);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ---- 主题单选 ---- */
+.settings-radio-row {
+  display: flex;
+  gap: var(--sp-3);
+}
+.settings-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink);
+}
+.settings-radio input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.settings-radio-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--graphite);
+  background: var(--card);
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+  position: relative;
+}
+.settings-radio input:checked + .settings-radio-mark {
+  border-color: var(--accent);
+}
+.settings-radio input:checked + .settings-radio-mark::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.settings-radio-label {
+  user-select: none;
+}
+
+/* ---- 强调色色板 ---- */
+.settings-swatches {
+  display: flex;
+  gap: var(--sp-3);
+}
+.settings-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.settings-swatch:hover {
+  transform: scale(1.08);
+}
+.settings-swatch.on {
+  border-color: var(--ink);
+}
+
+/* ---- 通用字段 ---- */
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-field-label {
+  font-size: 12px;
+  color: var(--graphite);
+}
+.settings-input {
+  height: 32px;
+  padding: 0 var(--sp-3);
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.settings-input:focus {
+  border-color: var(--accent);
+}
+.settings-error {
+  margin: 0;
+  font-size: 11.5px;
+  color: #d33;
+}
+
+/* ---- 滑块 ---- */
+.settings-slider {
+  flex: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--hairline);
+  border-radius: 2px;
+  outline: none;
+}
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.settings-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+.settings-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+}
+.settings-field:has(.settings-slider) {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.settings-slider-value {
+  font-size: 13px;
+  color: var(--ink);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* ---- 开关 ---- */
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.settings-toggle-label {
+  font-size: 13px;
+  color: var(--ink);
+  user-select: none;
+}
+.settings-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+.settings-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.settings-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--hairline);
+  border-radius: var(--r-pill);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.settings-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.settings-toggle input:checked + .settings-toggle-track {
+  background: var(--accent);
+}
+.settings-toggle input:checked + .settings-toggle-track::after {
+  transform: translateX(16px);
+}

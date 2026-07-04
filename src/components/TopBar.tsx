@@ -1,7 +1,7 @@
 import { type MouseEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Pane } from "../lib/types";
-import { SearchIcon, SunIcon, MoonIcon } from "./icons";
+import { SearchIcon, SunIcon, MoonIcon, PlusIcon, GridIcon } from "./icons";
 
 interface TopBarProps {
   pane: Pane;
@@ -12,6 +12,8 @@ interface TopBarProps {
   onSearchToggle: (on: boolean) => void;
   onToggleTheme: (e: MouseEvent<HTMLButtonElement>) => void;
   themeMode: "light" | "dark";
+  onNewPhrase?: () => void;
+  onEditOrder?: () => void;
 }
 
 export function TopBar({
@@ -23,6 +25,8 @@ export function TopBar({
   onSearchToggle,
   onToggleTheme,
   themeMode,
+  onNewPhrase,
+  onEditOrder,
 }: TopBarProps) {
   return (
     <div className="topbar">
@@ -70,6 +74,26 @@ export function TopBar({
               )}
             </AnimatePresence>
           </motion.div>
+        )}
+        {pane === "phrases" && (
+          <>
+            <button
+              className="icon-btn"
+              onClick={() => onEditOrder?.()}
+              title="编辑顺序"
+              aria-label="编辑顺序"
+            >
+              <GridIcon />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => onNewPhrase?.()}
+              title="新建"
+              aria-label="新建"
+            >
+              <PlusIcon />
+            </button>
+          </>
         )}
         <button
           className="icon-btn"

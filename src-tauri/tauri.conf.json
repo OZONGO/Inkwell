@@ -24,6 +24,19 @@
         "visible": false,
         "center": true,
         "shadow": false
+      },
+      {
+        "label": "settings",
+        "title": "设置",
+        "width": 480,
+        "height": 640,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "resizable": false,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {

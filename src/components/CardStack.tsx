@@ -8,9 +8,11 @@ interface StackProps {
   active: number;
   onSelect: (index: number) => void;
   onNav: (delta: number) => void;
+  onItemContext?: (item: ClipItem, e: React.MouseEvent) => void;
+  onItemLongPress?: (item: ClipItem) => void;
 }
 
-export function CardStack({ items, active, onSelect, onNav }: StackProps) {
+export function CardStack({ items, active, onSelect, onNav, onItemContext, onItemLongPress }: StackProps) {
   const visible = items.slice(active, active + 3);
   const lastWheel = useRef(0);
   return (
@@ -31,6 +33,8 @@ export function CardStack({ items, active, onSelect, onNav }: StackProps) {
             index={active + i}
             position={i}
             onClick={() => onSelect(active + i)}
+            onContextMenu={onItemContext ? (e) => onItemContext(item, e) : undefined}
+            onLongPress={onItemLongPress ? () => onItemLongPress(item) : undefined}
           />
         ))}
       </AnimatePresence>
