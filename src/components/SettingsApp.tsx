@@ -6,13 +6,18 @@ import { getSettings, setSetting, setAutostart } from "../lib/tauri";
 import { springUI } from "../lib/motion";
 import type { DisplayMode } from "../lib/types";
 
-type AccentValue = "blue" | "green" | "orple" | "red";
+type AccentValue = "blue" | "green" | "orple" | "red" | "amber" | "teal" | "rose" | "indigo" | "olive";
 
 const ACCENT_PRESETS: { value: AccentValue; label: string; color: string }[] = [
   { value: "blue", label: "蓝", color: "#2e5c8a" },
+  { value: "indigo", label: "靛", color: "#3a4a8a" },
+  { value: "teal", label: "青", color: "#2e8a8a" },
   { value: "green", label: "绿", color: "#2e8a5c" },
-  { value: "orple", label: "紫", color: "#6a2e8a" },
+  { value: "olive", label: "橄榄", color: "#6a7a3e" },
+  { value: "amber", label: "琥珀", color: "#b07a2e" },
   { value: "red", label: "红", color: "#c0392b" },
+  { value: "rose", label: "玫红", color: "#b85a7a" },
+  { value: "orple", label: "紫", color: "#6a2e8a" },
 ];
 
 // 快捷键说明（只读，不可更改）
@@ -115,15 +120,27 @@ export function SettingsApp() {
   }
 
   if (!loaded) {
+    // 骨架屏：模拟 section 结构（标题条 + 内容条），skeleton-pulse 脉冲，
+    // 加载完交叉淡入真实内容。不用 spinner（骨架更贴近真实内容几何）。
     return (
       <div className="settings-root">
-        <div className="settings-loading">加载中…</div>
+        <header className="settings-header">
+          <h1 className="settings-title">设置</h1>
+        </header>
+        <main className="settings-body">
+          {[0, 1, 2, 3].map((i) => (
+            <section className="settings-section" key={i}>
+              <div className="skeleton-bar" style={{ width: 90, height: 12 }} />
+              <div className="skeleton-bar" style={{ width: "100%", height: 32, marginTop: 8 }} />
+            </section>
+          ))}
+        </main>
       </div>
     );
   }
 
   return (
-    <div className="settings-root">
+    <div className="settings-root settings-loaded">
       <header className="settings-header">
         <h1 className="settings-title">设置</h1>
       </header>

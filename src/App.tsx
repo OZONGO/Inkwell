@@ -1,6 +1,6 @@
 import { flushSync } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -12,7 +12,8 @@ import { SearchView } from "./components/SearchView";
 import { PhraseGrid } from "./components/PhraseGrid";
 import { ContextMenu, type ContextMenuItem } from "./components/ContextMenu";
 import { PhraseEditModal } from "./components/PhraseEditModal";
-import { GearIcon } from "./components/icons";
+import { ClearConfirm } from "./components/ClearConfirm";
+import { TrashIcon, GearIcon } from "./components/icons";
 import { useTheme, type ThemeMode } from "./lib/theme";
 import { animatePanelHeight, animatePanelSize } from "./lib/animateWindowSize";
 import { easeOut, easeEnter, easeExit, durBase, durFast, durSlow, paneSlide, footerRoll } from "./lib/motion";
@@ -21,6 +22,7 @@ import {
   listPhrases,
   pasteItem,
   deleteClipboardItem,
+  clearClipboard,
   moveClipboardToFirst,
   moveClipboardToPhrases,
   editPhrase,
@@ -32,6 +34,7 @@ import {
   getSettings,
   openSettings,
   debugLog,
+  syncUnlisten,
 } from "./lib/tauri";
 import type { ClipItem, DisplayMode, Pane, View } from "./lib/types";
 import "./styles/base.css";
@@ -48,8 +51,14 @@ export default function App() {
     clipboard: 0,
     phrases: 0,
   });
-  const [flash, setFlash] = useState<string | null>(null);
+  const [flash, setFlash] = useState<{ text: string; error?: boolean } | null>(null);
   const flashTimer = useRef<number | null>(null);
+  // 数据是否已从后端加载完成。false 期间显示"加载中…"而非"还没有内容"，
+  // 避免首次挂载时空状态闪烁误导用户。
+  const [loaded, setLoaded] = useState(false);
+  // 面板退出动画态：hidePanel 时置 true，Panel 淡出后（180ms）再 win.hide()，
+  // 避免窗口瞬时消失来不及播退出动画。panel-shown 时置 false 重新进场。
+  const [panelHidden, setPanelHidden] = useState(false);
   // pane 切换方向：+1 = 向右翻（剪贴板→常用语），-1 = 向左翻（常用语→剪贴板）。
   // 用于 paneSlide 抽屉式换页的方向向量。默认 +1，切到常用语时设 +1、切回设 -1。
   const [paneDir, setPaneDir] = useState<1 | -1>(1);
@@ -66,12 +75,19 @@ export default function App() {
     title: string;
     initialValue: string;
     onConfirm: (text: string) => void;
+    originRect?: { left: number; top: number; width: number; height: number } | null;
   } | null>(null);
   // 任何 overlay（编辑弹窗 / 右键菜单）打开时，全局键盘快捷键让位。
   // React 的 e.stopPropagation() 只挡合成事件，挡不住 window 上的原生 listener，
   // 必须在 onKey 里读 ref 跳过，否则 Tab/方向键/Enter/Escape 会穿透到 overlay 背后的面板。
   const overlayOpenRef = useRef(false);
-  overlayOpenRef.current = phraseModal !== null || menu !== null;
+  // 清空剪贴板动画态：true 期间卡片播批量退场动画，空状态守卫挡住外层 AnimatePresence
+  // 提前卸载 CardStack/CardFlow。clearingRef 同步给 onClipboardUpdated 监听挡回灌事件。
+  const [clearing, setClearing] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const clearingRef = useRef(false);
+  clearingRef.current = clearing;
+  overlayOpenRef.current = phraseModal !== null || menu !== null || clearConfirm !== null;
 
   const items = pane === "clipboard" ? clip : phrases;
   const active = Math.min(activeByPane[pane], Math.max(0, items.length - 1));
@@ -91,8 +107,19 @@ export default function App() {
   }
 
   function hidePanel() {
-    if (isTauri()) getCurrentWindow().hide();
+    // 不直接 win.hide()，先触发 Panel 退出动画，由下方 useEffect 延迟 hide
+    setPanelHidden(true);
   }
+
+  // panelHidden 触发时，等 Panel 退出动画（durBase 180ms）跑完再 win.hide()。
+  // panel-shown 会 setPanelHidden(false)，cleanup 取消定时器（避免重新打开被误 hide）。
+  useEffect(() => {
+    if (!panelHidden || !isTauri()) return;
+    const timer = window.setTimeout(() => {
+      getCurrentWindow().hide();
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [panelHidden]);
 
   // 主题切换：从按钮位置开始圆形扩散（View Transitions API）
   function handleToggleTheme(e: MouseEvent<HTMLButtonElement>) {
@@ -120,15 +147,21 @@ export default function App() {
 
   // 挂载时拉取数据 + 订阅剪贴板更新事件
   useEffect(() => {
-    if (!isTauri()) return;
-    listClipboard().then(setClip);
-    listPhrases().then(setPhrases);
+    if (!isTauri()) {
+      setLoaded(true);  // 非Tauri环境（如测试）直接标记完成
+      return;
+    }
+    Promise.all([listClipboard(), listPhrases()])
+      .then(([c, p]) => {
+        setClip(c);
+        setPhrases(p);
+      })
+      .finally(() => setLoaded(true));
     const un = onClipboardUpdated(() => {
+      if (clearingRef.current) return;  // 清空期间忽略回灌事件，避免覆盖 setClip([])
       listClipboard().then(setClip);
     });
-    return () => {
-      un.then((f) => f());
-    };
+    return syncUnlisten(un);
   }, []);
 
   // 每次面板打开，重置到最新卡片（最前 = 最新）；refetch 数据 + 聚焦 DOM 使键盘立即生效
@@ -140,6 +173,7 @@ export default function App() {
       setQuery("");
       setMenu(null);
       setPhraseModal(null);
+      setPanelHidden(false);  // 重新进场（取消挂起的 hide 定时器）
       // 同步显示模式（用户可能在设置里改过）；Rust 端已按 settings 尺寸 resize 窗口
       getSettings().then((s) => setDisplayMode(s.display_mode === "flow" ? "flow" : "stack"));
       listClipboard().then(setClip);
@@ -150,9 +184,7 @@ export default function App() {
       focusRoot();
       requestAnimationFrame(focusRoot);
     });
-    return () => {
-      un.then((f) => f());
-    };
+    return syncUnlisten(un);
   }, []);
 
   // 点击面板外部或切窗口时自动隐藏（打开设置窗口导致的 blur 除外）
@@ -168,7 +200,7 @@ export default function App() {
       }
       win.hide();
     });
-    return () => { un.then((f) => f()); };
+    return syncUnlisten(un);
   }, []);
 
   // 监听设置窗口可见性（Rust 端 open_settings/toggle_settings emit）+ 显示模式切换
@@ -198,9 +230,11 @@ export default function App() {
       setDmDir(next === "flow" ? 1 : -1);
       setDisplayMode(next);
     });
+    const clean1 = syncUnlisten(un1);
+    const clean2 = syncUnlisten(un2);
     return () => {
-      un1.then((f) => f());
-      un2.then((f) => f());
+      clean1();
+      clean2();
     };
   }, [displayMode]);
 
@@ -220,9 +254,7 @@ export default function App() {
         document.documentElement.setAttribute("data-accent", v);
       }
     });
-    return () => {
-      un.then((f) => f());
-    };
+    return syncUnlisten(un);
   }, []);
 
   // Alt+C 全局热键：后端 emit toggle-search，前端 toggle 搜索框
@@ -239,9 +271,7 @@ export default function App() {
         setQuery("");
       }
     });
-    return () => {
-      un.then((f) => f());
-    };
+    return syncUnlisten(un);
   }, []);
 
   function paste(item: ClipItem) {
@@ -251,7 +281,7 @@ export default function App() {
         : item.text && item.text.length > 20
           ? item.text!.slice(0, 20) + "…"
           : item.text;
-    setFlash(label ?? "已粘贴");
+    setFlash({ text: label ?? "已粘贴" });
     if (flashTimer.current) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setFlash(null), 1100);
 
@@ -266,7 +296,57 @@ export default function App() {
       });
       setActiveByPane((p) => ({ ...p, clipboard: 0 }));
     }
-    pasteItem(item.id, pane === "phrases").catch((e) => console.error("paste failed", e));
+    pasteItem(item.id, pane === "phrases")
+      .then(() => {
+        // paste 成功后 Rust 端已 hide 窗口；同步前端 state，下次打开时 Panel 重新进场
+        setPanelHidden(true);
+      })
+      .catch((e) => {
+        console.error("paste failed", e);
+        // 错误反馈：红色 toast + shake（面板还可见时用户能看到）
+        setFlash({ text: "粘贴失败", error: true });
+        if (flashTimer.current) window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(() => setFlash(null), 1500);
+      });
+  }
+
+  // 点击 footer 清空按钮：捕获按钮位置，弹出确认气泡
+  function handleClearClick(e: MouseEvent<HTMLButtonElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setClearConfirm({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+  }
+
+  // 确认清空：置 clearing 态触发卡片批量退场动画，调 IPC 清空数据库，
+  // setClip([]) 让 CardStack/CardFlow 进入退出流程；onExitComplete 复位 clearing。
+  // 800ms 兜底定时器防止动画异常时永久卡死。
+  function handleClearConfirm() {
+    setClearConfirm(null);
+    setClearing(true);
+    clearingRef.current = true;
+    const fallback = window.setTimeout(() => {
+      setClearing(false);
+      clearingRef.current = false;
+    }, 800);
+    clearClipboard()
+      .then(() => {
+        setClip([]);
+      })
+      .catch((err: unknown) => {
+        console.error("clear clipboard failed", err);
+        window.clearTimeout(fallback);
+        setClearing(false);
+        clearingRef.current = false;
+        listClipboard().then(setClip);
+      });
+  }
+
+  function handleClearCancel() {
+    setClearConfirm(null);
+  }
+
+  function handleClearExitComplete() {
+    setClearing(false);
+    clearingRef.current = false;
   }
 
   useEffect(() => {
@@ -342,6 +422,7 @@ export default function App() {
 
   const footerText = (() => {
     if (searching) return `${searchResults.length} / ${clip.length} 条匹配`;
+    if (view === "grid") return `${phrases.length} 条`;  // grid 模式禁用 Tab，不显示提示
     if (pane === "clipboard") return `${clip.length} 条 · Tab 常用语`;
     return `${phrases.length} 条 · Tab 剪贴板`;
   })();
@@ -351,11 +432,14 @@ export default function App() {
   const footerKey = `${pane}:${view}:${searching ? query : ""}:${clip.length}:${phrases.length}`;
   const footerDir = paneDir;
 
-  // 新建常用语：打开自定义弹窗输入文本，确认后调用后端追加并更新本地状态
-  function handleNewPhrase() {
+  // 新建常用语：打开自定义弹窗输入文本，确认后调用后端追加并更新本地状态。
+  // 记录 + 按钮位置，弹窗从按钮位置扩展出来（originRect 驱动 PhraseEditModal 进场动画）。
+  function handleNewPhrase(e: MouseEvent<HTMLButtonElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
     setPhraseModal({
       title: "新建常用语",
       initialValue: "",
+      originRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       onConfirm: async (text) => {
         try {
           const item = await newPhrase(text);
@@ -486,10 +570,12 @@ export default function App() {
   }
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="stage">
       <AnimatePresence>
         <Panel
           key="panel"
+          hidden={panelHidden}
           footer={
             <>
               <span className="footer-roll-wrap">
@@ -506,18 +592,30 @@ export default function App() {
                   </motion.span>
                 </AnimatePresence>
               </span>
-              <button
-                className="icon-btn"
-                onClick={() => {
-                  // 置标志挡住打开设置窗口导致的首次 blur，避免面板自动隐藏
-                  suppressBlurRef.current = true;
-                  openSettings();
-                }}
-                title="设置"
-                aria-label="设置"
-              >
-                <GearIcon size={14} />
-              </button>
+              <div className="footer-actions">
+                {pane === "clipboard" && items.length > 0 && view !== "grid" && (
+                  <button
+                    className="icon-btn"
+                    onClick={handleClearClick}
+                    title="清空剪贴板"
+                    aria-label="清空剪贴板"
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                )}
+                <button
+                  className="icon-btn"
+                  onClick={() => {
+                    // 置标志挡住打开设置窗口导致的首次 blur，避免面板自动隐藏
+                    suppressBlurRef.current = true;
+                    openSettings();
+                  }}
+                  title="设置"
+                  aria-label="设置"
+                >
+                  <GearIcon size={14} />
+                </button>
+              </div>
             </>
           }
         >
@@ -590,7 +688,24 @@ export default function App() {
                     >
                       <SearchView items={searchResults} onSelect={paste} />
                     </motion.div>
-                  ) : items.length === 0 ? (
+                  ) : !loaded ? (
+                    <motion.div
+                      key="skeleton"
+                      className="panel-body-view card-flow"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: durFast, ease: easeOut }}
+                      style={{ height: "100%" }}
+                    >
+                      {[0, 1, 2].map((i) => (
+                        <div className="card-skeleton" key={i}>
+                          <div className="skeleton-bar" style={{ width: 60, height: 10 }} />
+                          <div className="skeleton-bar" style={{ flex: 1, width: "100%" }} />
+                        </div>
+                      ))}
+                    </motion.div>
+                  ) : items.length === 0 && !clearing ? (
                     <motion.div
                       key="empty"
                       className="panel-body-view stack-empty"
@@ -603,14 +718,10 @@ export default function App() {
                         {pane === "clipboard" ? "00" : "—"}
                       </div>
                       <p className="stack-empty-text">
-                        {pane === "clipboard"
-                          ? "还没有剪贴板内容"
-                          : "还没有常用语"}
+                        {pane === "clipboard" ? "还没有剪贴板内容" : "还没有常用语"}
                       </p>
                       <p className="stack-empty-hint mono">
-                        {pane === "clipboard"
-                          ? "复制任意文字即自动记录"
-                          : "点右上角 + 新建一条"}
+                        {pane === "clipboard" ? "复制任意文字即自动记录" : "点右上角 + 新建一条"}
                       </p>
                     </motion.div>
                   ) : (
@@ -643,8 +754,10 @@ export default function App() {
                         <CardFlow
                           items={items}
                           active={active}
+                          clearing={clearing}
+                          onExitComplete={handleClearExitComplete}
                           onSelect={(i) => paste(items[i])}
-                          onNav={(d) => setActive(active + d)}
+                          onHover={(i) => setActive(i)}
                           onItemContext={(item, e) =>
                             setMenu({ x: e.clientX, y: e.clientY, item })
                           }
@@ -660,6 +773,8 @@ export default function App() {
                         <CardStack
                           items={items}
                           active={active}
+                          clearing={clearing}
+                          onExitComplete={handleClearExitComplete}
                           onSelect={(i) => paste(items[i])}
                           onNav={(d) => setActive(active + d)}
                           onItemContext={(item, e) =>
@@ -686,13 +801,17 @@ export default function App() {
       <AnimatePresence>
         {flash ? (
           <motion.div
-            className="flash mono"
+            className={"flash mono" + (flash.error ? " error" : "")}
             initial={{ opacity: 0, y: 8, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            animate={flash.error
+              ? { opacity: 1, y: 0, scale: 1, x: [0, -4, 4, -2, 0] }
+              : { opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.95 }}
-            transition={{ duration: durBase, ease: easeEnter }}
+            transition={flash.error
+              ? { duration: 0.3, ease: easeOut }
+              : { duration: durBase, ease: easeEnter }}
           >
-            已粘贴 · {flash}
+            {flash.error ? flash.text : `已粘贴 · ${flash.text}`}
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -708,13 +827,25 @@ export default function App() {
         ) : null}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {clearConfirm ? (
+          <ClearConfirm
+            originRect={clearConfirm}
+            onConfirm={handleClearConfirm}
+            onCancel={handleClearCancel}
+          />
+        ) : null}
+      </AnimatePresence>
+
       <PhraseEditModal
         open={phraseModal !== null}
         title={phraseModal?.title ?? ""}
         initialValue={phraseModal?.initialValue ?? ""}
+        originRect={phraseModal?.originRect}
         onConfirm={(text) => phraseModal?.onConfirm(text)}
         onCancel={() => setPhraseModal(null)}
       />
     </div>
+    </MotionConfig>
   );
 }

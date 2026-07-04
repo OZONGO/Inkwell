@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import type { ClipItem } from "../lib/types";
 import { formatTime } from "../lib/format";
 import { staggerChildren, itemFadeUp, easeOut, durFast } from "../lib/motion";
@@ -16,26 +16,37 @@ export function SearchView({ items, onSelect }: Props) {
       initial="hidden"
       animate="show"
     >
-      {items.length === 0 ? (
-        <li className="search-empty">没有匹配的条目</li>
-      ) : (
-        items.map((it, i) => (
+      <AnimatePresence>
+        {items.length === 0 ? (
           <motion.li
-            key={it.id}
-            className="search-row"
-            variants={itemFadeUp}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => onSelect(it)}
+            key="empty"
+            className="search-empty"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: durFast, ease: easeOut }}
           >
-            <span className="card-serial mono">{String(i + 1).padStart(2, "0")}</span>
-            <span className="search-text">{it.text}</span>
-            <span className="search-time mono">{formatTime(it.time)}</span>
+            没有匹配的条目
           </motion.li>
-        ))
-      )}
+        ) : (
+          items.map((it, i) => (
+            <motion.li
+              key={it.id}
+              className="search-row"
+              variants={itemFadeUp}
+              initial="hidden"
+              animate="show"
+              exit="exit"
+              whileTap={{ scale: 0.98 }}
+              onClick={() => onSelect(it)}
+            >
+              <span className="card-serial mono">{String(i + 1).padStart(2, "0")}</span>
+              <span className="search-text">{it.text}</span>
+              <span className="search-time mono">{formatTime(it.time)}</span>
+            </motion.li>
+          ))
+        )}
+      </AnimatePresence>
     </motion.ul>
   );
 }
-
-// 保留导出避免 unused warning
-export { easeOut, durFast };

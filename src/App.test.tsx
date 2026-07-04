@@ -16,6 +16,7 @@ vi.mock("@tauri-apps/api/core", async () => {
       case "list_phrases": return Promise.resolve(mockPhrases);
       case "paste_item": return Promise.resolve();
       case "delete_clipboard_item": return Promise.resolve();
+      case "clear_clipboard": return Promise.resolve();
       case "search_clipboard": return Promise.resolve(mockClipboard);
       case "new_phrase": return Promise.resolve({ id: "new", type: "text", text: (args?.text as string) ?? "", time: Date.now() });
       case "edit_phrase": return Promise.resolve();
@@ -46,6 +47,9 @@ vi.mock("framer-motion", () => ({
     { get: (_, prop) => (prop === "input" ? "input" : "div") },
   ),
   AnimatePresence: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
+  MotionConfig: ({ children }: { children: React.ReactNode }) => (
     <>{children}</>
   ),
 }));
@@ -151,5 +155,22 @@ describe("App", () => {
     // 应匹配含 "tauri" 的项（不区分大小写）
     // mockClipboard[0] 含 "Tauri"
     expect(screen.getByText(/1 \/ 6 条匹配/)).toBeTruthy();
+  });
+
+  test("clear clipboard button shows confirm popover and invokes clear_clipboard on confirm", async () => {
+    const core = await import("@tauri-apps/api/core");
+    const invokeMock = core.invoke as ReturnType<typeof vi.fn>;
+    render(<App />);
+    await flushIPC();
+    // 点击清空剪贴板按钮
+    const clearBtn = screen.getByLabelText(/清空剪贴板/) as HTMLButtonElement;
+    fireEvent.click(clearBtn);
+    // 应出现确认气泡
+    expect(screen.getByText(/清空剪贴板？/)).toBeTruthy();
+    // 点击"是"
+    const confirmBtn = screen.getByText("是");
+    fireEvent.click(confirmBtn);
+    // 应调用 clear_clipboard 命令
+    expect(invokeMock).toHaveBeenCalledWith("clear_clipboard");
   });
 });

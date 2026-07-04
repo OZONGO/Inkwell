@@ -43,7 +43,16 @@ export const springUI = {
   mass: 0.5,
 };
 
+// hover 抬起：轻快回弹，用于卡片类元素的悬停反馈
+export const springHover = {
+  type: "spring" as const,
+  stiffness: 420,
+  damping: 30,
+  mass: 0.4,
+};
+
 // ---- 时长 ----
+export const durInstant = 0.08;
 export const durFast = 0.12;
 export const durBase = 0.18;
 export const durSlow = 0.26;
@@ -64,12 +73,27 @@ export function staggerChildren(_maxItems = 20) {
   };
 }
 
-// 右键菜单项错峰：比列表更密的一沓"翻纸条"节奏
+// 右键菜单容器：整体 scale-in（复用 overlayPop 节奏）+ 项错峰落位。
+// 比列表更密的一沓"翻纸条"节奏——容器落位后立刻错峰展开各项。
 export function menuStagger() {
   return {
-    hidden: {},
+    hidden: { opacity: 0, scale: 0.92, y: 8 },
     show: {
-      transition: { staggerChildren: 0.03, delayChildren: 0.04 },
+      opacity: 1,
+      scale: 1,
+      y: 0,
+      transition: {
+        duration: durBase,
+        ease: easeEnter,
+        staggerChildren: 0.03,
+        delayChildren: 0.04,
+      },
+    },
+    exit: {
+      opacity: 0,
+      scale: 0.95,
+      y: 6,
+      transition: { duration: durFast, ease: easeExit },
     },
   };
 }
@@ -148,6 +172,41 @@ export const footerRoll = {
   }),
 };
 
+// 骨架屏脉冲：opacity 0.5↔1 循环，1.2s，不用位移（避免分散注意力）
+export const skeletonPulse = {
+  initial: { opacity: 0.5 },
+  animate: {
+    opacity: [0.5, 1, 0.5],
+    transition: { duration: 1.2, repeat: Infinity, ease: "easeInOut" as const },
+  },
+  exit: {
+    opacity: 0,
+    transition: { duration: durFast, ease: easeExit },
+  },
+};
+
+// 错误抖动：x ±4px 两次，0.3s，用于错误 toast 反馈
+export const shake = {
+  animate: {
+    x: [0, -4, 4, -2, 0],
+    transition: { duration: 0.3, ease: easeOut },
+  },
+};
+
 // 按压反馈
 export const whileTap = { scale: 0.9 };
-export const whileHover = { scale: 1.05 };
+
+// 清空剪贴板时的卡片退场动画。
+// 堆叠模式：按 position（0/1/2）错峰 0/50/100ms，scale 0.88、y 12。
+// 卡片流模式：按 index 错峰（最多 8 张 × 30ms = 240ms），scale 0.92、y 10。
+export function clearExit(flat: boolean, position: number, index: number) {
+  const delay = flat
+    ? Math.min(index, 8) * 0.03
+    : (position ?? 0) * 0.05;
+  return {
+    opacity: 0,
+    scale: flat ? 0.92 : 0.88,
+    y: flat ? 10 : 12,
+    transition: { duration: durBase, ease: easeExit, delay },
+  };
+}

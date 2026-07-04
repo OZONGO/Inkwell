@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "剪贴板",
+  "productName": "Inkwell",
   "version": "0.1.0",
-  "identifier": "com.clipboard.tool",
+  "identifier": "com.inkwell.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "panel",
-        "title": "剪贴板",
+        "title": "Inkwell",
         "width": 380,
         "height": 320,
         "decorations": false,
@@ -28,7 +28,7 @@
       {
         "label": "settings",
         "url": "settings.html",
-        "title": "设置",
+        "title": "Inkwell 设置",
         "width": 480,
         "height": 640,
         "decorations": true,

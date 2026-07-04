@@ -127,27 +127,33 @@ fn handle_clipboard_change() {
         return;
     }
 
-    // 同步处理图片：DIB → 落盘 → 入库（截图类：file_path 为 None）
-    let (hash, original_path, thumb_path) =
-        match crate::image_store::save_image(&dib, &state.image_dir) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("save_image failed: {}", e);
-                return;
-            }
-        };
-    let conn = state.db.lock();
-    if let Err(e) = crate::db::insert_clipboard_image(
-        &conn,
-        &hash,
-        original_path.to_str().unwrap_or(""),
-        thumb_path.to_str().unwrap_or(""),
-        None,
-    ) {
-        eprintln!("insert_clipboard_image failed: {}", e);
-        return;
-    }
-    let _ = handle.emit_to("panel", "clipboard-updated", ());
+    // 图片处理 spawn 到独立线程，避免阻塞监听线程消息循环。
+    // 4K 截图的 DIB 解码 + PNG 编码 + Lanczos3 缩略图可能耗时数百毫秒，
+    // 同步处理会延迟后续 WM_CLIPBOARDUPDATE 的去抖定时器，快速连续复制时丢事件。
+    let handle = handle.clone();
+    std::thread::spawn(move || {
+        let Some(state) = handle.try_state::<crate::state::AppState>() else { return };
+        let (hash, original_path, thumb_path) =
+            match crate::image_store::save_image(&dib, &state.image_dir) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("save_image failed: {}", e);
+                    return;
+                }
+            };
+        let conn = state.db.lock();
+        if let Err(e) = crate::db::insert_clipboard_image(
+            &conn,
+            &hash,
+            original_path.to_str().unwrap_or(""),
+            thumb_path.to_str().unwrap_or(""),
+            None,
+        ) {
+            eprintln!("insert_clipboard_image failed: {}", e);
+            return;
+        }
+        let _ = handle.emit_to("panel", "clipboard-updated", ());
+    });
 }
 
 /// 启动剪贴板监听线程：创建 message-only 窗口 + 注册监听 + 200ms 去抖 + 自粘贴抑制

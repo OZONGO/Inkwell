@@ -10,6 +10,8 @@ interface StackProps {
   onNav: (delta: number) => void;      // 滚轮/方向键：+1 往后翻，-1 往前翻
   onItemContext?: (item: ClipItem, e: React.MouseEvent) => void;  // 右键菜单
   onItemLongPress?: (item: ClipItem) => void;  // 长按（600ms）触发右键菜单
+  clearing?: boolean;       // 清空剪贴板：触发批量退场动画
+  onExitComplete?: () => void;  // AnimatePresence 退场动画结束回调
 }
 
 /**
@@ -21,7 +23,7 @@ interface StackProps {
  * - active = n：跳过前 n 张，显示后 3 张
  * - 不足 3 张时按实际数量渲染
  */
-export function CardStack({ items, active, onSelect, onNav, onItemContext, onItemLongPress }: StackProps) {
+export function CardStack({ items, active, onSelect, onNav, onItemContext, onItemLongPress, clearing, onExitComplete }: StackProps) {
   const visible = items.slice(active, active + 3);
   const lastWheel = useRef(0);  // 上次滚轮时间戳，用于 110ms 去抖
   return (
@@ -34,7 +36,7 @@ export function CardStack({ items, active, onSelect, onNav, onItemContext, onIte
         onNav(e.deltaY > 0 ? 1 : -1);  // 向下滚 → 更旧（+1），向上滚 → 更新（-1）
       }}
     >
-      <AnimatePresence initial={false}>
+      <AnimatePresence onExitComplete={onExitComplete}>
         {visible.map((item, i) => (
           <Card
             key={item.id}
@@ -42,6 +44,7 @@ export function CardStack({ items, active, onSelect, onNav, onItemContext, onIte
             index={active + i}        // 全局序号（用于卡片左上角编号）
             position={i}               // 0=最前（全显），1/2=peek（偏移/缩小）
             active={i === 0}           // 堆叠模式：最前卡即选中卡
+            clearing={clearing}
             onClick={() => onSelect(active + i)}
             onContextMenu={onItemContext ? (e) => onItemContext(item, e) : undefined}
             onLongPress={onItemLongPress ? () => onItemLongPress(item) : undefined}

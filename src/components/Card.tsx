@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { motion } from "framer-motion";
 import type { ClipItem } from "../lib/types";
 import { formatTime } from "../lib/format";
-import { springCard, easeEnter, easeExit, easeOut, durFast } from "../lib/motion";
+import { springCard, springHover, easeOut, durFast, clearExit } from "../lib/motion";
 
 interface CardProps {
   item: ClipItem;
@@ -10,6 +10,7 @@ interface CardProps {
   position?: number; // 堆叠模式：0 = front, 1/2 = peek
   active?: boolean;  // 是否选中（堆叠=最前卡；卡片流=当前焦点卡）
   flat?: boolean;    // 卡片流模式：平铺，无堆叠偏移
+  clearing?: boolean;  // 清空剪贴板：触发批量退场动画
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   onLongPress?: () => void;
@@ -24,7 +25,7 @@ const POS = [
   { y: -52, scale: 0.95, opacity: 1, z: 10, rotate: 0.8 },
 ];
 
-export function Card({ item, index, position, active, flat, onClick, onContextMenu, onLongPress }: CardProps) {
+export function Card({ item, index, position, active, flat, clearing, onClick, onContextMenu, onLongPress }: CardProps) {
   const p = POS[position ?? 0] ?? POS[2];
   const isActive = active ?? (!flat && position === 0);
   const serial = String(index + 1).padStart(2, "0");
@@ -65,8 +66,21 @@ export function Card({ item, index, position, active, flat, onClick, onContextMe
       style={{ zIndex: flat ? undefined : p.z, transformOrigin: "50% 100%" }}
       initial={flat ? { opacity: 0, y: 8 } : { y: -44, scale: 0.9, opacity: 0, rotate: 0 }}
       animate={flat ? { opacity: 1, y: 0 } : { y: p.y, scale: p.scale, opacity: p.opacity, rotate: p.rotate }}
-      exit={flat ? { opacity: 0, y: 16 } : { y: 40, scale: 1, opacity: 0, rotate: 0 }}
+      exit={
+        clearing
+          ? clearExit(!!flat, position ?? 0, index)
+          : flat
+            ? { opacity: 0, y: 16 }
+            : { y: 40, scale: 1, opacity: 0, rotate: 0 }
+      }
       transition={flat ? { duration: durFast, ease: easeOut } : springCard}
+      whileHover={
+        flat
+          ? { y: -2, transition: springHover }
+          : !isActive
+            ? { scale: 1.04, transition: springHover }
+            : undefined
+      }
       whileTap={flat ? { scale: 0.98 } : isActive ? { scale: 0.97 } : undefined}
       onClick={onClick}
       onContextMenu={(e) => {
@@ -99,6 +113,3 @@ export function Card({ item, index, position, active, flat, onClick, onContextMe
     </motion.div>
   );
 }
-
-// 保留导出供外部类型推断
-export { easeEnter, easeExit, durFast };

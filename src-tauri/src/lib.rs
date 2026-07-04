@@ -210,7 +210,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&settings_item, &quit])?;
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("no window icon").clone())
-                .tooltip("剪贴板")
+                .tooltip("Inkwell")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     if event.id().as_ref() == "settings" {
@@ -238,6 +238,8 @@ pub fn run() {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = win.hide();
+                        // 通知面板设置窗口已关闭，解除 blur 抑制（否则点击面板外不再自动隐藏）
+                        let _ = win.app_handle().emit_to("panel", "settings-visibility", false);
                     }
                 });
             }
@@ -253,6 +255,7 @@ pub fn run() {
             commands::list_phrases,
             commands::paste_item,
             commands::delete_clipboard_item,
+            commands::clear_clipboard,
             commands::move_clipboard_to_first,
             commands::move_clipboard_to_phrases,
             commands::search_clipboard,

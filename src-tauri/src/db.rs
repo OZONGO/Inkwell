@@ -288,6 +288,30 @@ pub fn delete_clipboard_item(conn: &Connection, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// 清空全部剪贴板条目；图片条目同时删除磁盘上的原图与缩略图（缺失文件忽略）
+pub fn clear_clipboard(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT original_path, thumb_path FROM clipboard_items WHERE kind = 'image'")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let paths: Vec<(Option<String>, Option<String>)> =
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM clipboard_items", [])
+        .map_err(|e| e.to_string())?;
+    for (orig, thumb) in paths {
+        if let Some(p) = orig { let _ = std::fs::remove_file(Path::new(&p)); }
+        if let Some(p) = thumb { let _ = std::fs::remove_file(Path::new(&p)); }
+    }
+    Ok(())
+}
+
 /// 将剪贴板条目移入常用语；图片条目不允许移入。
 /// 移入 = 复制到常用语，原剪贴板条目保留（用户可在剪贴板里继续使用或手动删除）
 pub fn move_clipboard_to_phrases(conn: &Connection, id: i64) -> Result<(), String> {

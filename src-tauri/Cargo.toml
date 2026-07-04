@@ -1,12 +1,12 @@
 [package]
-name = "app"
+name = "inkwell"
 version = "0.1.0"
-description = "A Tauri App"
+description = "Inkwell - 墨池剪切板"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "app_lib"
+name = "inkwell_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

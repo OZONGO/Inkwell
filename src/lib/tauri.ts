@@ -24,6 +24,11 @@ export async function deleteClipboardItem(id: string): Promise<void> {
   await invoke("delete_clipboard_item", { id });
 }
 
+export async function clearClipboard(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("clear_clipboard");
+}
+
 export async function searchClipboard(query: string): Promise<ClipItem[]> {
   if (!isTauri()) return [];
   return invoke<ClipItem[]>("search_clipboard", { query });
@@ -111,4 +116,23 @@ export async function repositionPanel(): Promise<void> {
 export function onClipboardUpdated(cb: () => void): Promise<UnlistenFn> {
   if (!isTauri()) return Promise.resolve((() => {}) as UnlistenFn);
   return listen("clipboard-updated", cb);
+}
+
+/// 把 Promise<UnlistenFn> 转成同步 cleanup 函数。
+/// React useEffect 的 cleanup 是同步调用的，但 Tauri listen 返回 Promise——
+/// 原写法 `return () => { un.then(f => f()) }` 把取消操作排进微任务，
+/// 若组件在 Promise resolve 前卸载，监听器会泄漏直到进程退出。
+/// 这里用 cancelled flag：Promise resolve 时若已卸载则立即取消，否则缓存；
+/// cleanup 同步调用缓存的 unlisten。
+export function syncUnlisten(un: Promise<UnlistenFn>): () => void {
+  let cancelled = false;
+  let unlisten: UnlistenFn | null = null;
+  un.then((f) => {
+    if (cancelled) f();
+    else unlisten = f;
+  });
+  return () => {
+    cancelled = true;
+    unlisten?.();
+  };
 }

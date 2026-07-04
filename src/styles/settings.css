@@ -15,6 +15,15 @@
   font-size: 13px;
 }
 
+/* 加载完成：真实内容淡入（覆盖骨架）。骨架样式 .skeleton-bar 在 base.css 全局定义 */
+.settings-loaded .settings-body {
+  animation: settings-fade-in var(--dur) var(--ease-out);
+}
+@keyframes settings-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .settings-header {
   padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--hairline);
@@ -107,22 +116,28 @@
 /* ---- 强调色色板 ---- */
 .settings-swatches {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-3);
 }
 .settings-swatch {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 2px solid transparent;
   box-shadow: inset 0 0 0 1px var(--hairline);
   transition: transform var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .settings-swatch:hover {
   transform: scale(1.08);
 }
 .settings-swatch.on {
-  border-color: var(--ink);
+  /* 双层外环：paper 间隙（与背景同色挖空）+ ink 外圈。
+     ink 在浅色近黑、深色暖白，两种模式都与背景强对比；
+     paper 间隙隔开色块与外圈，层次清晰不混淆。
+     替代原单 border-color 方案——浅色模式黑圈不明显的根因是 border 紧贴色板无层次。 */
+  box-shadow: inset 0 0 0 1px var(--hairline),
+    0 0 0 2px var(--paper),
+    0 0 0 4px var(--ink);
 }
 
 /* ---- 分段选择器（显示模式） ---- */

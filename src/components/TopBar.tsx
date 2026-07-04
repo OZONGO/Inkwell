@@ -13,7 +13,7 @@ interface TopBarProps {
   onSearchToggle: (on: boolean) => void;
   onToggleTheme: (e: MouseEvent<HTMLButtonElement>) => void;
   themeMode: "light" | "dark";
-  onNewPhrase?: () => void;
+  onNewPhrase?: (e: MouseEvent<HTMLButtonElement>) => void;
   onEditOrder?: () => void;
   /// grid 排序模式下隐藏分段切换器 + 编辑按钮，只留主题切换
   hideSwitch?: boolean;
@@ -106,7 +106,7 @@ export function TopBar({
             <motion.button
               className="icon-btn"
               whileTap={whileTap}
-              onClick={() => onNewPhrase?.()}
+              onClick={(e) => onNewPhrase?.(e)}
               title="新建"
               aria-label="新建"
             >

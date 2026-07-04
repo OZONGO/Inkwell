@@ -72,6 +72,12 @@ pub fn delete_clipboard_item(state: State<AppState>, id: String) -> Result<(), S
 }
 
 #[tauri::command]
+pub fn clear_clipboard(state: State<AppState>) -> Result<(), String> {
+    let conn = state.db.lock();
+    db::clear_clipboard(&conn)
+}
+
+#[tauri::command]
 pub fn move_clipboard_to_first(state: State<AppState>, id: String) -> Result<(), String> {
     let conn = state.db.lock();
     let id = id.parse::<i64>().map_err(|e| e.to_string())?;
