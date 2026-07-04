@@ -2,7 +2,8 @@
 name = "inkwell"
 version = "0.1.0"
 description = "Inkwell - 墨池剪切板"
-authors = ["you"]
+authors = ["sor9ryloo"]
+license = "MIT"
 edition = "2021"
 
 [lib]
