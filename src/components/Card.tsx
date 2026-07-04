@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { motion } from "framer-motion";
 import type { ClipItem } from "../lib/types";
 import { formatTime } from "../lib/format";
+import { springCard, easeEnter, easeExit, durFast } from "../lib/motion";
 
 interface CardProps {
   item: ClipItem;
@@ -12,11 +13,13 @@ interface CardProps {
   onLongPress?: () => void;
 }
 
-// mechanical, card-catalog feel: stiff spring, low bounce
+// 堆叠位置：前卡正面，后卡向上偏移+缩小米窥。
+// peek 卡加极轻微旋转（±1°），模拟桌上散落的纸条——
+// 不是花哨的倾斜，而是肉眼几乎察觉不到的"不齐"。
 const POS = [
-  { y: 0, scale: 1, opacity: 1, z: 30 },
-  { y: -36, scale: 0.975, opacity: 1, z: 20 },
-  { y: -52, scale: 0.95, opacity: 1, z: 10 },
+  { y: 0, scale: 1, opacity: 1, z: 30, rotate: 0 },
+  { y: -36, scale: 0.975, opacity: 1, z: 20, rotate: -1 },
+  { y: -52, scale: 0.95, opacity: 1, z: 10, rotate: 0.8 },
 ];
 
 export function Card({ item, index, position, onClick, onContextMenu, onLongPress }: CardProps) {
@@ -57,11 +60,12 @@ export function Card({ item, index, position, onClick, onContextMenu, onLongPres
     <motion.div
       className="card"
       data-active={active}
-      style={{ zIndex: p.z }}
-      initial={{ y: -44, scale: 0.9, opacity: 0 }}
-      animate={{ y: p.y, scale: p.scale, opacity: p.opacity }}
-      exit={{ y: 40, scale: 1, opacity: 0 }}
-      transition={{ type: "spring", stiffness: 440, damping: 36, mass: 0.7 }}
+      style={{ zIndex: p.z, transformOrigin: "50% 100%" }}
+      initial={{ y: -44, scale: 0.9, opacity: 0, rotate: 0 }}
+      animate={{ y: p.y, scale: p.scale, opacity: p.opacity, rotate: p.rotate }}
+      exit={{ y: 40, scale: 1, opacity: 0, rotate: 0 }}
+      transition={springCard}
+      whileTap={active ? { scale: 0.97 } : undefined}
       onClick={onClick}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -93,3 +97,6 @@ export function Card({ item, index, position, onClick, onContextMenu, onLongPres
     </motion.div>
   );
 }
+
+// 保留导出供外部类型推断
+export { easeEnter, easeExit, durFast };

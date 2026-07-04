@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import type { ClipItem } from "../lib/types";
 import { formatTime } from "../lib/format";
+import { staggerChildren, itemFadeUp, easeOut, durFast } from "../lib/motion";
 
 interface Props {
   items: ClipItem[];
@@ -9,7 +10,12 @@ interface Props {
 
 export function SearchView({ items, onSelect }: Props) {
   return (
-    <ul className="search-list">
+    <motion.ul
+      className="search-list"
+      variants={staggerChildren()}
+      initial="hidden"
+      animate="show"
+    >
       {items.length === 0 ? (
         <li className="search-empty">没有匹配的条目</li>
       ) : (
@@ -17,9 +23,8 @@ export function SearchView({ items, onSelect }: Props) {
           <motion.li
             key={it.id}
             className="search-row"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.015 }}
+            variants={itemFadeUp}
+            whileTap={{ scale: 0.98 }}
             onClick={() => onSelect(it)}
           >
             <span className="card-serial mono">{String(i + 1).padStart(2, "0")}</span>
@@ -28,6 +33,9 @@ export function SearchView({ items, onSelect }: Props) {
           </motion.li>
         ))
       )}
-    </ul>
+    </motion.ul>
   );
 }
+
+// 保留导出避免 unused warning
+export { easeOut, durFast };

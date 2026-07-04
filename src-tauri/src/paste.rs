@@ -12,7 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use clipboard_win::raw;
 use tauri::{AppHandle, Manager};
 
-/// 执行粘贴：写剪贴板 → 设自粘贴抑制 → 抢回前台 → SendInput Ctrl+V → 置顶 → 隐藏面板（如 !shift）
+/// 执行粘贴：写剪贴板 → 设自粘贴抑制 → 抢回前台 → SendInput Ctrl+V → 置顶 → 隐藏面板
 ///
 /// `move_to_first` 控制粘贴后是否将该条置顶（剪贴板需要，常用语不需要）。
 pub fn do_paste(
@@ -20,7 +20,6 @@ pub fn do_paste(
     app: &AppHandle,
     text: String,
     id: i64,
-    shift: bool,
     move_to_first: bool,
 ) -> Result<(), String> {
     // 1. 写文本到剪贴板（CF_UNICODETEXT）—— raw::set_string 不自行打开剪贴板，需先 OpenClipboard
@@ -37,12 +36,12 @@ pub fn do_paste(
         *last = Some((text.clone(), Instant::now()));
     }
 
-    // 3. hide 面板让系统把前台还给目标窗口 → 等目标成为前台 → Ctrl+V（Shift 时粘贴后重显面板）
-    let target = state.get_target_hwnd();
+    // 3. hide 面板让系统把前台还给目标窗口 → 等目标成为前台 → Ctrl+V
+    let target = crate::foreground_tracker::last_target();
     if target == 0 {
         return Err("no target window captured".into());
     }
-    paste_to_target(app, HWND(target as *mut core::ffi::c_void), shift)?;
+    paste_to_target(app, HWND(target as *mut core::ffi::c_void))?;
 
     // 4. 置顶剪贴板条目（仅剪贴板使用，常用语不重排）
     if move_to_first {
@@ -62,7 +61,6 @@ pub fn do_paste_image(
     state: &crate::state::AppState,
     app: &AppHandle,
     id: i64,
-    shift: bool,
 ) -> Result<(), String> {
     let (original_path, file_path) = {
         let conn = state.db.lock();
@@ -88,12 +86,12 @@ pub fn do_paste_image(
             .map_err(|e| format!("set CF_DIB failed: {}", e))?;
     }
 
-    // 2. hide 面板让系统把前台还给目标窗口 → 等目标成为前台 → Ctrl+V（与 do_paste 一致）
-    let target = state.get_target_hwnd();
+    // 2. hide 面板让系统把前台还给目标窗口 → 等目标成为前台 → Ctrl+V
+    let target = crate::foreground_tracker::last_target();
     if target == 0 {
         return Err("no target window captured".into());
     }
-    paste_to_target(app, HWND(target as *mut core::ffi::c_void), shift)?;
+    paste_to_target(app, HWND(target as *mut core::ffi::c_void))?;
 
     // 3. 置顶
     {
@@ -107,11 +105,10 @@ pub fn do_paste_image(
 ///
 /// 思路：先 `hide` 面板，由 Windows 按默认行为把前台还给上一个前台窗口（目标）——
 /// 这正是「关闭面板后光标自动回到输入框」的机制，比 `SetForegroundWindow` 可靠
-/// （后者受前台锁限制，从命令工作线程调用常被静默拒绝）。
+///（后者受前台锁限制，从命令工作线程调用常被静默拒绝）。
 /// hide 后轮询确认目标已成为前台再 `SendInput`；超时则用 `AttachThreadInput`
 /// 附加到当前前台线程获取权限，兜底 `SetForegroundWindow`。
-/// Shift 粘贴：粘贴完成后重新显示面板。
-fn paste_to_target(app: &AppHandle, target_hwnd: HWND, shift: bool) -> Result<(), String> {
+fn paste_to_target(app: &AppHandle, target_hwnd: HWND) -> Result<(), String> {
     let panel = app.get_webview_window("panel");
 
     // 1. hide 面板：触发系统把前台还给目标窗口
@@ -147,13 +144,6 @@ fn paste_to_target(app: &AppHandle, target_hwnd: HWND, shift: bool) -> Result<()
     // 4. 模拟 Ctrl+V
     send_ctrl_v();
 
-    // 5. Shift 粘贴：重新显示并聚焦面板
-    if shift {
-        if let Some(win) = &panel {
-            let _ = win.show();
-            let _ = win.set_focus();
-        }
-    }
     Ok(())
 }
 

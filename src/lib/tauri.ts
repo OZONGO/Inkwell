@@ -14,9 +14,9 @@ export async function listPhrases(): Promise<ClipItem[]> {
   return invoke<ClipItem[]>("list_phrases");
 }
 
-export async function pasteItem(id: string, shift: boolean, from_phrases: boolean = false): Promise<void> {
+export async function pasteItem(id: string, from_phrases: boolean = false): Promise<void> {
   if (!isTauri()) return;
-  await invoke("paste_item", { id, shift, fromPhrases: from_phrases });
+  await invoke("paste_item", { id, fromPhrases: from_phrases });
 }
 
 export async function deleteClipboardItem(id: string): Promise<void> {
@@ -79,16 +79,16 @@ export async function setSetting(key: string, value: string): Promise<void> {
   await invoke("set_setting", { key, value });
 }
 
-// 设置热键（后端会校验格式 + 冲突 + 注册）
-export async function setHotkey(key: string, value: string): Promise<void> {
-  if (!isTauri()) return;
-  await invoke("set_hotkey", { key, value });
-}
-
 // 设置开机自启（通过 autostart 插件注册系统级启动项）
 export async function setAutostart(enabled: boolean): Promise<void> {
   if (!isTauri()) return;
   await invoke("set_autostart", { enabled });
+}
+
+// 打开设置窗口（面板右下角齿轮按钮调用）
+export async function openSettings(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("open_settings");
 }
 
 export function onClipboardUpdated(cb: () => void): Promise<UnlistenFn> {

@@ -1,6 +1,7 @@
 mod clipboard_listener;
 mod commands;
 mod db;
+mod foreground_tracker;
 mod image_store;
 mod paste;
 mod settings;
@@ -16,7 +17,7 @@ use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MONITOR_DEFAULTTONEAREST, MONITORINFO,
 };
 use windows::Win32::UI::Shell::{ABM_GETTASKBARPOS, APPBARDATA, SHAppBarMessage};
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
+use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
 fn toggle_panel(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("panel") {
@@ -25,12 +26,8 @@ fn toggle_panel(app: &tauri::AppHandle) {
                 let _ = win.hide();
             }
             _ => {
-                // 显示前捕获当前前台窗口，作为粘贴回切目标
-                if let Some(state) = app.try_state::<state::AppState>() {
-                    let hwnd = unsafe { GetForegroundWindow() };
-                    state.set_target_hwnd(hwnd.0 as isize);
-                }
                 // 面板定位到鼠标所在显示器的工作区角落（避开任务栏）
+                // 粘贴目标窗口由 foreground_tracker 后台线程持续记录，无需在此捕获
                 if let Some((x, y)) = compute_panel_position(380, 320) {
                     let _ = win.set_position(PhysicalPosition::new(x, y));
                 }
@@ -110,35 +107,15 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        // 按 HotKey id 分派：解析 settings 中的热键字符串并比较 id，
-                        // 兼容 ctrl/control、cmd/super 等不同写法归一化
+                        // 热键固定不可改：直接按 id 分派（兼容 ctrl/control 等写法归一化）
                         let triggered_id = shortcut.id();
-                        let dispatched = if let Some(state) = app.try_state::<state::AppState>() {
-                            let (panel_hk, search_hk) = {
-                                let conn = state.db.lock();
-                                match crate::db::get_settings(&conn) {
-                                    Ok(s) => (
-                                        s.get("hotkey_panel").cloned().unwrap_or_else(|| "alt+v".to_string()),
-                                        s.get("hotkey_search").cloned().unwrap_or_else(|| "alt+c".to_string()),
-                                    ),
-                                    Err(_) => ("alt+v".to_string(), "alt+c".to_string()),
-                                }
-                            };
-                            let panel_id = Shortcut::from_str(&panel_hk).ok().map(|s| s.id());
-                            let search_id = Shortcut::from_str(&search_hk).ok().map(|s| s.id());
-                            if Some(triggered_id) == panel_id {
-                                toggle_panel(app);
-                                true
-                            } else if Some(triggered_id) == search_id {
-                                let _ = app.emit_to("panel", "toggle-search", ());
-                                true
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
-                        let _ = dispatched;
+                        let panel_id = Shortcut::from_str("alt+v").ok().map(|s| s.id());
+                        let search_id = Shortcut::from_str("alt+c").ok().map(|s| s.id());
+                        if Some(triggered_id) == panel_id {
+                            toggle_panel(app);
+                        } else if Some(triggered_id) == search_id {
+                            let _ = app.emit_to("panel", "toggle-search", ());
+                        }
                     }
                 })
                 .build(),
@@ -177,32 +154,25 @@ pub fn run() {
                 }
             }
 
-            // 从 settings 读取热键并注册：在后台线程调用 register（其内部
-            // 通过 run_on_main_thread 派发到主线程，从主线程调用会死锁）
+            // 注册全局热键（固定 alt+v / alt+c，不可改）：
+            // 在后台线程调用 register（其内部通过 run_on_main_thread 派发到主线程，
+            // 从主线程调用会死锁）
             {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     use tauri_plugin_global_shortcut::GlobalShortcutExt;
-                    let state = handle.state::<state::AppState>();
-                    let (panel_hk, search_hk) = {
-                        let conn = state.db.lock();
-                        match crate::db::get_settings(&conn) {
-                            Ok(s) => (
-                                s.get("hotkey_panel").cloned().unwrap_or_else(|| "alt+v".to_string()),
-                                s.get("hotkey_search").cloned().unwrap_or_else(|| "alt+c".to_string()),
-                            ),
-                            Err(_) => ("alt+v".to_string(), "alt+c".to_string()),
-                        }
-                    };
                     let gs = handle.global_shortcut();
-                    if let Err(e) = gs.register(panel_hk.as_str()) {
+                    if let Err(e) = gs.register("alt+v") {
                         eprintln!("注册面板热键失败: {}", e);
                     }
-                    if let Err(e) = gs.register(search_hk.as_str()) {
+                    if let Err(e) = gs.register("alt+c") {
                         eprintln!("注册搜索热键失败: {}", e);
                     }
                 });
             }
+
+            // 启动前台窗口追踪线程（持续记录粘贴目标窗口，供 paste 回切）
+            std::thread::spawn(|| foreground_tracker::run());
 
             let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -230,6 +200,17 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // settings 窗口点 X 时改为 hide，避免销毁后无法再打开
+            if let Some(settings_win) = app.get_webview_window("settings") {
+                let win = settings_win.clone();
+                settings_win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win.hide();
+                    }
+                });
+            }
+
             // 启动 Win32 剪贴板监听线程
             let handle = app.handle().clone();
             std::thread::spawn(move || clipboard_listener::run(handle));
@@ -251,8 +232,8 @@ pub fn run() {
             commands::reorder_phrases,
             settings::get_settings,
             settings::set_setting,
-            settings::set_hotkey,
             settings::set_autostart,
+            commands::open_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

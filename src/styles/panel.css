@@ -34,22 +34,37 @@
 }
 .seg {
   display: flex;
-  gap: 2px;
+  gap: 0;
   background: var(--paper);
   border-radius: var(--r-pill);
   padding: 2px;
+  position: relative;
+}
+/* layoutId 滑动指示器：绝对定位填充当前按钮，Framer Motion layout 动画滑动 */
+.seg-indicator {
+  position: absolute;
+  inset: 0;
+  background: var(--card);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow);
+  z-index: 0;
 }
 .seg-btn {
+  position: relative;
+  z-index: 1;
   padding: 5px 12px;
   font-size: 12px;
   color: var(--graphite);
   border-radius: var(--r-pill);
-  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  background: none;
+  transition: color var(--dur-fast) var(--ease-out);
 }
 .seg-btn.on {
   color: var(--ink);
-  background: var(--card);
-  box-shadow: var(--shadow);
+}
+.seg-label {
+  position: relative;
+  z-index: 1;
 }
 .topbar-actions {
   display: flex;
@@ -64,6 +79,7 @@
   color: var(--graphite);
   border-radius: 8px;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  cursor: pointer;
 }
 .icon-btn:hover {
   background: var(--paper);
@@ -206,6 +222,10 @@
   color: var(--graphite);
   letter-spacing: 0.02em;
   flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 /* ---- search results ---- */

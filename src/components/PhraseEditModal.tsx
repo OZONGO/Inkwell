@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { overlayPop, easeOut, durFast, whileTap } from "../lib/motion";
 
 interface PhraseEditModalProps {
   open: boolean;
@@ -70,15 +71,14 @@ export function PhraseEditModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.14 }}
+          transition={{ duration: durFast, ease: easeOut }}
           onClick={onCancel}
         >
           <motion.div
             className="modal"
-            initial={{ opacity: 0, scale: 0.92, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.92, y: 8 }}
-            transition={{ duration: 0.18, ease: [0.22, 0.61, 0.36, 1] }}
+            initial={overlayPop.initial}
+            animate={overlayPop.animate}
+            exit={overlayPop.exit}
             onClick={(e) => e.stopPropagation()}
             // bubble 阶段拦截：textarea 处理完按键后，事件冒泡到这里被挡住，
             // 不再传到 window 上 App 的全局 keydown（否则方向键会滚动卡片）
@@ -96,12 +96,20 @@ export function PhraseEditModal({
             />
             <div className="modal-hint mono">Ctrl+Enter 确定 · Esc 取消</div>
             <div className="modal-actions">
-              <button className="modal-btn" onClick={onCancel}>
+              <motion.button
+                className="modal-btn"
+                whileTap={whileTap}
+                onClick={onCancel}
+              >
                 取消
-              </button>
-              <button className="modal-btn primary" onClick={confirm}>
+              </motion.button>
+              <motion.button
+                className="modal-btn primary"
+                whileTap={whileTap}
+                onClick={confirm}
+              >
                 确定
-              </button>
+              </motion.button>
             </div>
           </motion.div>
         </motion.div>

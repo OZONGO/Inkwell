@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::db::{self, ClipItemDto};
 use crate::state::AppState;
@@ -9,7 +9,8 @@ use crate::state::AppState;
 #[tauri::command]
 pub fn list_clipboard(state: State<AppState>) -> Result<Vec<ClipItemDto>, String> {
     let conn = state.db.lock();
-    db::list_clipboard(&conn, 50)
+    let limit = db::get_max_items(&conn)?;
+    db::list_clipboard(&conn, limit)
 }
 
 #[tauri::command]
@@ -23,7 +24,6 @@ pub fn paste_item(
     state: State<AppState>,
     app: tauri::AppHandle,
     id: String,
-    shift: bool,
     from_phrases: bool,
 ) -> Result<(), String> {
     let id = id.parse::<i64>().map_err(|e| e.to_string())?;
@@ -40,7 +40,7 @@ pub fn paste_item(
             .map_err(|e| format!("常用语未找到: {}", e))?
         };
         // 常用语仅有纯文本，不走图片分支；move_to_first = false 不重排
-        crate::paste::do_paste(&state, &app, text, id, shift, false)
+        crate::paste::do_paste(&state, &app, text, id, false)
     } else {
         // 剪贴板：按 kind 分派 text / image
         let kind: String = {
@@ -53,14 +53,14 @@ pub fn paste_item(
             .map_err(|e| e.to_string())?
         };
         if kind == "image" {
-            return crate::paste::do_paste_image(&state, &app, id, shift);
+            return crate::paste::do_paste_image(&state, &app, id);
         }
         let text = {
             let conn = state.db.lock();
             db::get_clipboard_text(&conn, id)?
                 .ok_or_else(|| "clipboard item not found".to_string())?
         };
-        crate::paste::do_paste(&state, &app, text, id, shift, true)
+        crate::paste::do_paste(&state, &app, text, id, true)
     }
 }
 
@@ -127,4 +127,20 @@ pub fn reorder_phrases(state: State<AppState>, ids: Vec<String>) -> Result<(), S
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
     db::reorder_phrases(&conn, &ids)
+}
+
+/// 打开设置窗口：已显示则隐藏，否则显示并聚焦（供面板右下角齿轮按钮调用）
+#[tauri::command]
+pub fn open_settings(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("settings") {
+        match win.is_visible() {
+            Ok(true) => {
+                let _ = win.hide();
+            }
+            _ => {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }
+    }
 }

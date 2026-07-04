@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import type { ClipItem } from "../lib/types";
+import { springGrid, springSnap, easeOut } from "../lib/motion";
 
 interface Props {
   items: ClipItem[];
@@ -70,17 +71,15 @@ export function PhraseGrid({ items, onReorder, onExit }: Props) {
               }}
               exit={{ scale: 0.7, opacity: 0 }}
               transition={{
-                layout: { type: "spring", stiffness: 380, damping: 30, mass: 0.8 },
+                layout: springGrid,
                 // 错峰：越靠后延迟越多，模拟惯性依次落位
                 delay: dragId ? 0 : Math.min(i * 0.035, 0.25),
-                type: "spring",
-                stiffness: 420,
-                damping: 26,
-                mass: 0.7,
+                ...springSnap,
               }}
               drag
               dragSnapToOrigin
               dragElastic={0.4}
+              dragTransition={{ bounceStiffness: springSnap.stiffness, bounceDamping: springSnap.damping }}
               onDragStart={() => setDragId(item.id)}
               onDragEnd={(_, info) => handleDragEnd(item, info)}
               whileHover={{ scale: dragId ? undefined : 1.02 }}
@@ -96,3 +95,4 @@ export function PhraseGrid({ items, onReorder, onExit }: Props) {
 
 // 保留类型导出供可能的外部使用
 export type { RPointerEvent };
+export { easeOut };

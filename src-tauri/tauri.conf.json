@@ -27,6 +27,7 @@
       },
       {
         "label": "settings",
+        "url": "settings.html",
         "title": "设置",
         "width": 480,
         "height": 640,
@@ -40,7 +41,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "bundle": {

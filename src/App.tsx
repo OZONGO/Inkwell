@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { Panel } from "./components/Panel";
 import { TopBar } from "./components/TopBar";
 import { CardStack } from "./components/CardStack";
@@ -11,7 +11,9 @@ import { SearchView } from "./components/SearchView";
 import { PhraseGrid } from "./components/PhraseGrid";
 import { ContextMenu, type ContextMenuItem } from "./components/ContextMenu";
 import { PhraseEditModal } from "./components/PhraseEditModal";
+import { GearIcon } from "./components/icons";
 import { useTheme, type ThemeMode } from "./lib/theme";
+import { easeOut, easeEnter, durBase, durFast, paneSlide, footerRoll } from "./lib/motion";
 import {
   listClipboard,
   listPhrases,
@@ -26,6 +28,7 @@ import {
   reorderPhrases,
   onClipboardUpdated,
   getSettings,
+  openSettings,
 } from "./lib/tauri";
 import type { ClipItem, Pane, View } from "./lib/types";
 import "./styles/base.css";
@@ -44,6 +47,9 @@ export default function App() {
   });
   const [flash, setFlash] = useState<string | null>(null);
   const flashTimer = useRef<number | null>(null);
+  // pane 切换方向：+1 = 向右翻（剪贴板→常用语），-1 = 向左翻（常用语→剪贴板）。
+  // 用于 paneSlide 抽屉式换页的方向向量。默认 +1，切到常用语时设 +1、切回设 -1。
+  const [paneDir, setPaneDir] = useState<1 | -1>(1);
   const [menu, setMenu] = useState<{ x: number; y: number; item: ClipItem } | null>(null);
   const [phraseModal, setPhraseModal] = useState<{
     title: string;
@@ -83,6 +89,9 @@ export default function App() {
     } else {
       setTheme(next);
     }
+    emit("theme-changed", next).catch((e) =>
+      console.error("emit theme-changed failed", e),
+    );
   }
 
   // 挂载时拉取数据 + 订阅剪贴板更新事件
@@ -148,7 +157,7 @@ export default function App() {
     };
   }, []);
 
-  function paste(item: ClipItem, shift: boolean = false) {
+  function paste(item: ClipItem) {
     const label =
       item.type === "image"
         ? "图片"
@@ -170,7 +179,7 @@ export default function App() {
       });
       setActiveByPane((p) => ({ ...p, clipboard: 0 }));
     }
-    pasteItem(item.id, shift, pane === "phrases").catch((e) => console.error("paste failed", e));
+    pasteItem(item.id, pane === "phrases").catch((e) => console.error("paste failed", e));
   }
 
   useEffect(() => {
@@ -202,10 +211,16 @@ export default function App() {
       } else if (e.key === "Enter") {
         e.preventDefault();
         const it = items[active];
-        if (it) paste(it, e.shiftKey);
+        if (it) paste(it);
       } else if (e.key === "Tab") {
         e.preventDefault();
-        setPane((p) => (p === "clipboard" ? "phrases" : "clipboard"));
+        setPane((p) => {
+          const next = p === "clipboard" ? "phrases" : "clipboard";
+          setPaneDir(next === "phrases" ? 1 : -1);
+          setView("stack");
+          setQuery("");
+          return next;
+        });
       }
     }
     // Alt 弹起时重新聚焦，弥补被 WebView2 菜单模式吞掉的焦点
@@ -236,6 +251,11 @@ export default function App() {
     if (pane === "clipboard") return `${clip.length} 条 · Tab 常用语`;
     return `${phrases.length} 条 · Tab 剪贴板`;
   })();
+
+  // footer 滚动方向：计数涨用 +1（新数字从下进），缩水用 -1。粘贴置顶删到剪贴板
+  // 时计数不变但内容变，仍用 +1 维持"翻向更新"的感觉；切 pane 用 paneDir 呼应。
+  const footerKey = `${pane}:${view}:${searching ? query : ""}:${clip.length}:${phrases.length}`;
+  const footerDir = paneDir;
 
   // 新建常用语：打开自定义弹窗输入文本，确认后调用后端追加并更新本地状态
   function handleNewPhrase() {
@@ -362,10 +382,40 @@ export default function App() {
   return (
     <div className="stage">
       <AnimatePresence>
-        <Panel key="panel" footer={footerText}>
+        <Panel
+          key="panel"
+          footer={
+            <>
+              <span className="footer-roll-wrap">
+                <AnimatePresence mode="wait" custom={footerDir} initial={false}>
+                  <motion.span
+                    key={footerKey}
+                    className="footer-roll"
+                    custom={footerDir}
+                    initial={footerRoll.initial(footerDir)}
+                    animate={footerRoll.animate}
+                    exit={footerRoll.exit(footerDir)}
+                  >
+                    {footerText}
+                  </motion.span>
+                </AnimatePresence>
+              </span>
+              <button
+                className="icon-btn"
+                onClick={() => openSettings()}
+                title="设置"
+                aria-label="设置"
+              >
+                <GearIcon size={14} />
+              </button>
+            </>
+          }
+        >
           <TopBar
             pane={pane}
             onPane={(p) => {
+              // 记录翻页方向：常用语在右、剪贴板在左，新 pane 在当前之右则 +1
+              setPaneDir(p === "phrases" ? 1 : -1);
               setPane(p);
               setView("stack");
               setQuery("");
@@ -388,63 +438,101 @@ export default function App() {
             onEditOrder={handleEnterGrid}
           />
           <div className="panel-body">
-            <AnimatePresence mode="wait">
-              {view === "grid" && pane === "phrases" ? (
-                <motion.div
-                  key="grid"
-                  className="panel-body-view"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  transition={{ duration: 0.18, ease: [0.22, 0.61, 0.36, 1] }}
-                  style={{ height: "100%", display: "flex", flexDirection: "column" }}
-                >
-                  <PhraseGrid
-                    items={phrases}
-                    onReorder={handlePhraseReorder}
-                    onExit={handleExitGrid}
-                  />
-                </motion.div>
-              ) : searching ? (
-                <motion.div
-                  key="search"
-                  className="panel-body-view"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.14 }}
-                  style={{ height: "100%" }}
-                >
-                  <SearchView items={searchResults} onSelect={paste} />
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="stack"
-                  className="panel-body-view"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0, scale: 0.94 }}
-                  transition={{ duration: 0.16, ease: [0.22, 0.61, 0.36, 1] }}
-                  style={{ height: "100%" }}
-                >
-                  <CardStack
-                    items={items}
-                    active={active}
-                    onSelect={(i) => paste(items[i])}
-                    onNav={(d) => setActive(active + d)}
-                    onItemContext={(item, e) =>
-                      setMenu({ x: e.clientX, y: e.clientY, item })
-                    }
-                    onItemLongPress={(item) =>
-                      setMenu({
-                        x: window.innerWidth / 2,
-                        y: window.innerHeight / 2,
-                        item,
-                      })
-                    }
-                  />
-                </motion.div>
-              )}
+            {/* 外层：按 pane 抽屉式换页（剪贴板 ↔ 常用语），方向与顶部指示器一致 */}
+            <AnimatePresence mode="wait" custom={paneDir} initial={false}>
+              <motion.div
+                key={pane}
+                className="panel-body-view"
+                custom={paneDir}
+                variants={paneSlide.enter(paneDir)}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                style={{ height: "100%", display: "flex", flexDirection: "column" }}
+              >
+                {/* 内层：按 view 切换（堆叠 / 搜索 / 网格） */}
+                <AnimatePresence mode="wait">
+                  {view === "grid" && pane === "phrases" ? (
+                    <motion.div
+                      key="grid"
+                      className="panel-body-view"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0, scale: 0.96 }}
+                      transition={{ duration: durBase, ease: easeEnter }}
+                      style={{ height: "100%", display: "flex", flexDirection: "column" }}
+                    >
+                      <PhraseGrid
+                        items={phrases}
+                        onReorder={handlePhraseReorder}
+                        onExit={handleExitGrid}
+                      />
+                    </motion.div>
+                  ) : searching ? (
+                    <motion.div
+                      key="search"
+                      className="panel-body-view"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: durFast, ease: easeOut }}
+                      style={{ height: "100%" }}
+                    >
+                      <SearchView items={searchResults} onSelect={paste} />
+                    </motion.div>
+                  ) : items.length === 0 ? (
+                    <motion.div
+                      key="empty"
+                      className="panel-body-view stack-empty"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      transition={{ duration: durBase, ease: easeEnter }}
+                    >
+                      <div className="stack-empty-slip mono">
+                        {pane === "clipboard" ? "00" : "—"}
+                      </div>
+                      <p className="stack-empty-text">
+                        {pane === "clipboard"
+                          ? "还没有剪贴板内容"
+                          : "还没有常用语"}
+                      </p>
+                      <p className="stack-empty-hint mono">
+                        {pane === "clipboard"
+                          ? "复制任意文字即自动记录"
+                          : "点右上角 + 新建一条"}
+                      </p>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="stack"
+                      className="panel-body-view"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0, scale: 0.94 }}
+                      transition={{ duration: 0.16, ease: easeEnter }}
+                      style={{ height: "100%" }}
+                    >
+                      <CardStack
+                        items={items}
+                        active={active}
+                        onSelect={(i) => paste(items[i])}
+                        onNav={(d) => setActive(active + d)}
+                        onItemContext={(item, e) =>
+                          setMenu({ x: e.clientX, y: e.clientY, item })
+                        }
+                        onItemLongPress={(item) =>
+                          setMenu({
+                            x: window.innerWidth / 2,
+                            y: window.innerHeight / 2,
+                            item,
+                          })
+                        }
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
             </AnimatePresence>
           </div>
         </Panel>
@@ -454,10 +542,10 @@ export default function App() {
         {flash ? (
           <motion.div
             className="flash mono"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.16 }}
+            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+            transition={{ duration: durBase, ease: easeEnter }}
           >
             已粘贴 · {flash}
           </motion.div>

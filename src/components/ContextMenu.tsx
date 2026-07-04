@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { motion } from "framer-motion";
+import { overlayPop, whileTap } from "../lib/motion";
 
 export interface ContextMenuItem {
   label: string;
@@ -30,22 +31,22 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       <motion.ul
         className="ctx-menu"
         style={{ left: x, top: y }}
-        initial={{ opacity: 0, scale: 0.92 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.92 }}
-        transition={{ duration: 0.12 }}
+        initial={overlayPop.initial}
+        animate={overlayPop.animate}
+        exit={overlayPop.exit}
       >
         {items.map((it) => (
           <li key={it.label}>
-            <button
+            <motion.button
               className={`ctx-item${it.danger ? " danger" : ""}`}
+              whileTap={whileTap}
               onClick={() => {
                 it.action();
                 onClose();
               }}
             >
               {it.label}
-            </button>
+            </motion.button>
           </li>
         ))}
       </motion.ul>

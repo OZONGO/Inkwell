@@ -91,8 +91,6 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), Stri
 pub fn init_default_settings(conn: &Connection) -> Result<(), String> {
     let defaults = [
         ("max_items", "50"),
-        ("hotkey_panel", "alt+v"),
-        ("hotkey_search", "alt+c"),
         ("theme", "follow"),
         ("accent", "blue"),
         ("autostart", "off"),

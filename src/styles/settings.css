@@ -246,3 +246,35 @@
 .settings-toggle input:checked + .settings-toggle-track::after {
   transform: translateX(16px);
 }
+
+/* ---- 快捷键说明（只读） ---- */
+.settings-shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.settings-shortcut-desc {
+  color: var(--graphite);
+}
+.settings-kbd-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.settings-kbd {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 2px 6px;
+  letter-spacing: 0.02em;
+}

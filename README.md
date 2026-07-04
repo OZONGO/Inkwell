@@ -11,6 +11,7 @@
 - **两套主题**：默认跟随系统，可手动切换浅色/深色，带圆形扩散过渡动画
 - **极简扁平 + 微动效**：Framer Motion 物理弹簧动效，层次靠缩放/偏移/投影而非透明度
 - **去重与自动淘汰**：相同内容提到栈顶不重复；保留最近 50 条（可配置），超出自动移除最旧
+- **真实后端**：基于 `AddClipboardFormatListener` 的剪贴板监听 + SQLite 持久化 + blake3 图片去重落盘
 
 ## 技术栈
 
@@ -60,18 +61,25 @@ npm run tauri dev
 app/
 ├── src/                  # 前端 React
 │   ├── components/       # Panel / TopBar / Card / CardStack / SearchView
-│   ├── lib/              # useTheme / types
-│   ├── data/             # mock.ts（当前 mock 数据）
+│   │                   # PhraseGrid / PhraseEditModal / ContextMenu / SettingsApp
+│   ├── lib/              # useTheme / tauri(IPC 封装) / types / motion
+│   ├── data/             # mock.ts（测试用 mock 数据） / formatTime 工具函数
 │   ├── styles/           # tokens(配色/字号) / base(重置/主题动画) / panel(面板/卡片/搜索)
-│   └── App.tsx           # 顶层状态机（导航/粘贴/键盘）
+│   └── App.tsx           # 顶层状态机（通过 Tauri IPC 调用后端）
 ├── src-tauri/            # Rust 后端
-│   ├── src/lib.rs        # 单实例 / 全局热键 Alt+V / 托盘 / toggle_panel
+│   ├── src/lib.rs        # 单实例 / 全局热键 / 托盘 / toggle_panel
+│   ├── src/clipboard_listener.rs  # AddClipboardFormatListener 监听
+│   ├── src/db.rs         # SQLite 读写（剪贴板 / 常用语 / 设置）
+│   ├── src/image_store.rs         # 图片 blake3 去重落盘 + 预览
+│   ├── src/paste.rs      # AttachThreadInput + SetForegroundWindow 回切粘贴
+│   ├── src/commands.rs   # Tauri IPC 命令注册
+│   ├── src/settings.rs   # 设置读写 + 热键注册
+│   ├── src/state.rs      # AppState 共享状态
 │   ├── tauri.conf.json   # 无边框透明窗口 / bundle 配置
 │   └── capabilities/     # 窗口 / 事件权限
 ├── docs/                 # 设计文档（灵感.md / 设计决策.md）
 ├── public/               # 图标
-├── package.json
-└── CLAUDE.md             # AI 辅助开发指南
+└── package.json
 ```
 
 ## 交互操作
@@ -92,6 +100,11 @@ app/
 
 ## 当前状态
 
-- ✅ 已完成：面板壳、托盘、热键、主题动画、堆叠+搜索前端（mock 数据）
-- 🚧 进行中：真剪贴板后端（监听 / SQLite / 去重 / 图片落盘 / 粘贴回切）
-- ⏳ 待铺：常用语网格排序模式、独立设置窗口
+- ✅ 已完成：面板壳、托盘、热键、Alt+V 呼出、主题动画、堆叠+搜索前端
+- ✅ 已完成：剪贴板监听（`AddClipboardFormatListener` 事件驱动）
+- ✅ 已完成：SQLite 持久化 + blake3 图片去重 + 原图/预览落盘 + HDROP 还原
+- ✅ 已完成：粘贴回切（`AttachThreadInput` + `SetForegroundWindow` + `SendInput` Ctrl+V）
+- ✅ 已完成：常用语网格排序（拖拽磁力让位 + 弹簧吸附）、新建/修改/删除
+- ✅ 已完成：独立设置窗口（热键自定义 / 最大条数 / 主题 / 开机自启）
+- ✅ 已完成：单元测试覆盖核心模块（24 用例全部通过）
+- 🚧 待铺：托盘自定义菜单、剪贴板历史白名单过滤
