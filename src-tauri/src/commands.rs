@@ -1,4 +1,4 @@
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, PhysicalPosition, State};
 
 use crate::db::{self, ClipItemDto};
 use crate::state::AppState;
@@ -129,18 +129,57 @@ pub fn reorder_phrases(state: State<AppState>, ids: Vec<String>) -> Result<(), S
     db::reorder_phrases(&conn, &ids)
 }
 
+/// 重新定位面板到鼠标所在显示器的工作区角落（避开任务栏）。
+/// 供前端在显示模式切换 resize 后调用——resize 只改尺寸不重定位，
+/// 面板贴底部时变高会让底边溢出屏幕，必须按新高度重算 y。
+#[tauri::command]
+pub fn reposition_panel(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("panel") {
+        let sz = win.outer_size().unwrap_or_default();
+        let factor = win.scale_factor().unwrap_or(1.0);
+        let logical_w = (sz.width as f64 / factor) as i32;
+        let logical_h = (sz.height as f64 / factor) as i32;
+        if let Some((x, y)) = crate::compute_panel_position(logical_w, logical_h) {
+            let _ = win.set_position(PhysicalPosition::new(
+                (x as f64 * factor) as i32,
+                (y as f64 * factor) as i32,
+            ));
+        }
+    }
+}
+
 /// 打开设置窗口：已显示则隐藏，否则显示并聚焦（供面板右下角齿轮按钮调用）
+/// 同时 emit settings-visibility 事件，让面板据此决定是否抑制 blur 自动隐藏
 #[tauri::command]
 pub fn open_settings(app: tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("settings") {
         match win.is_visible() {
             Ok(true) => {
                 let _ = win.hide();
+                let _ = app.emit_to("panel", "settings-visibility", false);
             }
             _ => {
                 let _ = win.show();
                 let _ = win.set_focus();
+                let _ = app.emit_to("panel", "settings-visibility", true);
             }
         }
+    }
+}
+
+/// 诊断日志：前端把切换模式等关键节点的状态发来，Rust 端 eprintln 到终端 +
+/// 追加写到 app_data_dir/panel.diag.log（tauri dev 终端肉眼可见，文件事后可翻）
+#[tauri::command]
+pub fn debug_log(app: tauri::AppHandle, msg: String) {
+    use tauri::Manager;
+    eprintln!("[diag] {}", msg);
+    if let Ok(dir) = app.path().app_data_dir() {
+        let path = dir.join("panel.diag.log");
+        let line = format!("[diag] {}\n", msg);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
     }
 }

@@ -41,6 +41,7 @@ export function CardStack({ items, active, onSelect, onNav, onItemContext, onIte
             item={item}
             index={active + i}        // 全局序号（用于卡片左上角编号）
             position={i}               // 0=最前（全显），1/2=peek（偏移/缩小）
+            active={i === 0}           // 堆叠模式：最前卡即选中卡
             onClick={() => onSelect(active + i)}
             onContextMenu={onItemContext ? (e) => onItemContext(item, e) : undefined}
             onLongPress={onItemLongPress ? () => onItemLongPress(item) : undefined}

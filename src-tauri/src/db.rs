@@ -94,6 +94,7 @@ pub fn init_default_settings(conn: &Connection) -> Result<(), String> {
         ("theme", "follow"),
         ("accent", "blue"),
         ("autostart", "off"),
+        ("display_mode", "stack"),
     ];
     for (key, value) in defaults {
         conn.execute(
@@ -115,6 +116,22 @@ pub fn get_max_items(conn: &Connection) -> Result<i64, String> {
         _ => Err(e),
     }).map_err(|e| e.to_string())?;
     Ok(value.and_then(|v| v.parse::<i64>().ok()).unwrap_or(50))
+}
+
+/// 读取显示模式（stack/flow），缺失或非法值时回退为 "stack"
+pub fn get_display_mode(conn: &Connection) -> Result<String, String> {
+    let value: Option<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'display_mode'",
+        [],
+        |row| row.get(0),
+    ).or_else(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        _ => Err(e),
+    }).map_err(|e| e.to_string())?;
+    Ok(match value.as_deref() {
+        Some("flow") => "flow".to_string(),
+        _ => "stack".to_string(),
+    })
 }
 
 /// 插入文本条目：若已存在相同文本则置顶（更新 created_at），否则插入新行；随后执行淘汰

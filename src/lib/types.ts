@@ -15,3 +15,6 @@ export interface ClipItem {
 export type Pane = "clipboard" | "phrases";
 // 视图模式：堆叠卡片 / 搜索列表 / 网格排序
 export type View = "stack" | "search" | "grid";
+// 显示模式：堆叠卡片 / 卡片流（持久偏好，存 settings.display_mode，与 View 区分——
+// displayMode 是用户偏好，view 是临时状态）
+export type DisplayMode = "stack" | "flow";

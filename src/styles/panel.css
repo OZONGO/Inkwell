@@ -20,6 +20,11 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: width var(--dur-slow) var(--ease-out);
+}
+
+.stage:has(.phrase-grid-wrap) .panel {
+  width: 700px;
 }
 
 /* ---- top bar ---- */
@@ -137,6 +142,45 @@
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+/* ---- card flow (displayMode=flow) ---- */
+.card-flow {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;  /* 卡片居中（320 宽在 360 宽面板里居中） */
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--graphite) 35%, transparent) transparent;
+}
+.card-flow::-webkit-scrollbar {
+  width: 6px;
+}
+.card-flow::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--graphite) 35%, transparent);
+  border-radius: 3px;
+}
+.card-flow-cell {
+  width: var(--card-w);
+  flex-shrink: 0;
+}
+/* 卡片流复用 .card，但覆盖堆叠的绝对定位（left/50%/margin-left/bottom） */
+.card-flow .card {
+  position: relative;
+  left: auto;
+  margin-left: 0;
+  bottom: auto;
+}
+/* 卡片流选中态：左侧 accent 色条（圆珠笔勾选隐喻）+ shadow-lift 浮起，
+   覆盖堆叠模式的 gradient 背景——卡片流用克制的色条标记，而非整卡渐变 */
+.card-flow .card[data-active="true"] {
+  box-shadow: var(--shadow-lift), inset 3px 0 0 var(--accent);
+  background: var(--card);
 }
 
 /* ---- card ---- */
@@ -508,4 +552,9 @@
 .modal-btn.primary:hover {
   background: color-mix(in srgb, var(--accent) 85%, var(--ink) 12%);
   color: var(--paper);
+}
+.modal-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }

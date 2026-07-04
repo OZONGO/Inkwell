@@ -91,6 +91,23 @@ export async function openSettings(): Promise<void> {
   await invoke("open_settings");
 }
 
+// 诊断日志：前端把关键节点状态发到 Rust 端，eprintln 到终端 + 追加写文件
+export async function debugLog(msg: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("debug_log", { msg });
+  } catch (e) {
+    console.error("debug_log failed", e);
+  }
+}
+
+// 重新定位面板到鼠标所在显示器的工作区角落（避开任务栏）。
+// 显示模式切换 resize 后调用——resize 只改尺寸不重定位，需按新高度重算 y 避免溢出屏幕
+export async function repositionPanel(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("reposition_panel");
+}
+
 export function onClipboardUpdated(cb: () => void): Promise<UnlistenFn> {
   if (!isTauri()) return Promise.resolve((() => {}) as UnlistenFn);
   return listen("clipboard-updated", cb);

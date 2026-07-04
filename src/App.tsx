@@ -7,13 +7,15 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { Panel } from "./components/Panel";
 import { TopBar } from "./components/TopBar";
 import { CardStack } from "./components/CardStack";
+import { CardFlow } from "./components/CardFlow";
 import { SearchView } from "./components/SearchView";
 import { PhraseGrid } from "./components/PhraseGrid";
 import { ContextMenu, type ContextMenuItem } from "./components/ContextMenu";
 import { PhraseEditModal } from "./components/PhraseEditModal";
 import { GearIcon } from "./components/icons";
 import { useTheme, type ThemeMode } from "./lib/theme";
-import { easeOut, easeEnter, durBase, durFast, paneSlide, footerRoll } from "./lib/motion";
+import { animatePanelHeight, animatePanelSize } from "./lib/animateWindowSize";
+import { easeOut, easeEnter, easeExit, durBase, durFast, durSlow, paneSlide, footerRoll } from "./lib/motion";
 import {
   listClipboard,
   listPhrases,
@@ -29,8 +31,9 @@ import {
   onClipboardUpdated,
   getSettings,
   openSettings,
+  debugLog,
 } from "./lib/tauri";
-import type { ClipItem, Pane, View } from "./lib/types";
+import type { ClipItem, DisplayMode, Pane, View } from "./lib/types";
 import "./styles/base.css";
 import "./styles/panel.css";
 
@@ -50,16 +53,37 @@ export default function App() {
   // pane 切换方向：+1 = 向右翻（剪贴板→常用语），-1 = 向左翻（常用语→剪贴板）。
   // 用于 paneSlide 抽屉式换页的方向向量。默认 +1，切到常用语时设 +1、切回设 -1。
   const [paneDir, setPaneDir] = useState<1 | -1>(1);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("stack");
+  // 显示模式切换方向：flow 比 stack 高，切到 flow 时 +1（内容从下方进入），
+  // 切回 stack 时 -1（内容从上方进入），与窗口向下生长/向上收缩的方向感一致
+  const [dmDir, setDmDir] = useState<1 | -1>(1);
+  // suppressBlurRef：点齿轮按钮时置 true，挡住打开设置窗口导致的首次 blur
+  // settingsVisibleRef：设置窗口可见期间持续为 true，挡住后续 blur
+  const suppressBlurRef = useRef(false);
+  const settingsVisibleRef = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number; item: ClipItem } | null>(null);
   const [phraseModal, setPhraseModal] = useState<{
     title: string;
     initialValue: string;
     onConfirm: (text: string) => void;
   } | null>(null);
+  // 任何 overlay（编辑弹窗 / 右键菜单）打开时，全局键盘快捷键让位。
+  // React 的 e.stopPropagation() 只挡合成事件，挡不住 window 上的原生 listener，
+  // 必须在 onKey 里读 ref 跳过，否则 Tab/方向键/Enter/Escape 会穿透到 overlay 背后的面板。
+  const overlayOpenRef = useRef(false);
+  overlayOpenRef.current = phraseModal !== null || menu !== null;
 
   const items = pane === "clipboard" ? clip : phrases;
   const active = Math.min(activeByPane[pane], Math.max(0, items.length - 1));
   const searching = view === "search" && pane === "clipboard";
+  const searchingRef = useRef(searching);
+  searchingRef.current = searching;
+  const paneRef = useRef(pane);
+  paneRef.current = pane;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const displayModeRef = useRef(displayMode);
+  displayModeRef.current = displayMode;
 
   function setActive(n: number) {
     const clamped = Math.max(0, Math.min(n, items.length - 1));
@@ -114,6 +138,10 @@ export default function App() {
       setActiveByPane({ clipboard: 0, phrases: 0 });
       setView("stack");
       setQuery("");
+      setMenu(null);
+      setPhraseModal(null);
+      // 同步显示模式（用户可能在设置里改过）；Rust 端已按 settings 尺寸 resize 窗口
+      getSettings().then((s) => setDisplayMode(s.display_mode === "flow" ? "flow" : "stack"));
       listClipboard().then(setClip);
       listPhrases().then(setPhrases);
       // 立即聚焦 + 下一帧再试，覆盖 Alt 键弹起时 WebView2 的焦点抢占
@@ -127,29 +155,88 @@ export default function App() {
     };
   }, []);
 
-  // 点击面板外部或切窗口时自动隐藏
+  // 点击面板外部或切窗口时自动隐藏（打开设置窗口导致的 blur 除外）
   useEffect(() => {
     if (!isTauri()) return;
     const win = getCurrentWindow();
     const un = win.listen("tauri://blur", () => {
+      const suppressed = suppressBlurRef.current || settingsVisibleRef.current;
+      debugLog(`blur: suppressed=${suppressed} suppressBlur=${suppressBlurRef.current} settingsVisible=${settingsVisibleRef.current}`);
+      if (suppressed) {
+        suppressBlurRef.current = false;
+        return;
+      }
       win.hide();
     });
     return () => { un.then((f) => f()); };
   }, []);
 
-  // 挂载时从设置读取强调色 + 监听 SettingsApp 发出的 accent-changed 事件
+  // 监听设置窗口可见性（Rust 端 open_settings/toggle_settings emit）+ 显示模式切换
+  // 设置窗口 emit display-mode-changed 时，面板若可见则做 resize 动画 + 切内容
+  useEffect(() => {
+    if (!isTauri()) return;
+    const un1 = listen<boolean>("settings-visibility", (e) => {
+      settingsVisibleRef.current = e.payload === true;
+    });
+    const un2 = listen<DisplayMode>("display-mode-changed", async (e) => {
+      const next: DisplayMode = e.payload === "flow" ? "flow" : "stack";
+      const win = getCurrentWindow();
+      const visible = await win.isVisible();
+      debugLog(`dm-changed: from=${displayMode} next=${next} visible=${visible} view=${viewRef.current}`);
+      // grid 模式下窗口尺寸由 grid 控制（720×480），不动画高度——animatePanelHeight
+      // 内部宽度硬编码 380 会把 grid 的 720 宽压回 380，破坏布局。
+      // 只更新 state，退出 grid 时 handleExitGrid 按新 displayMode 恢复高度
+      if (visible && viewRef.current !== "grid") {
+        const toH = next === "flow" ? 615 : 320;
+        animatePanelHeight(toH, 260).catch((err) =>
+          debugLog(`dm-changed: animatePanelHeight FAILED ${String(err)}`),
+        );
+      } else {
+        debugLog(`dm-changed: skipped resize (not visible or in grid)`);
+      }
+      // 方向：切到 flow（更高）内容从下方进入，切回 stack 从上方进入
+      setDmDir(next === "flow" ? 1 : -1);
+      setDisplayMode(next);
+    });
+    return () => {
+      un1.then((f) => f());
+      un2.then((f) => f());
+    };
+  }, [displayMode]);
+
+  // 挂载时从设置读取强调色 + 显示模式 + 监听 SettingsApp 发出的 accent-changed 事件
   useEffect(() => {
     if (!isTauri()) return;
     getSettings()
       .then((s) => {
         const a = s.accent;
         if (a) document.documentElement.setAttribute("data-accent", a);
+        if (s.display_mode === "flow") setDisplayMode("flow");
       })
-      .catch((e) => console.error("load accent failed", e));
+      .catch((e) => console.error("load settings failed", e));
     const un = listen<string>("accent-changed", (e) => {
       const v = e.payload;
       if (typeof v === "string") {
         document.documentElement.setAttribute("data-accent", v);
+      }
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
+  // Alt+C 全局热键：后端 emit toggle-search，前端 toggle 搜索框
+  useEffect(() => {
+    if (!isTauri()) return;
+    const un = listen("toggle-search", () => {
+      if (overlayOpenRef.current) return;  // 弹窗/菜单打开时不抢搜索
+      if (paneRef.current !== "clipboard") return;
+      const on = !searchingRef.current;
+      if (on) {
+        setView("search");
+      } else {
+        setView("stack");
+        setQuery("");
       }
     });
     return () => {
@@ -184,6 +271,8 @@ export default function App() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // 弹窗/右键菜单打开时，键盘事件交给 overlay 自身处理，全局快捷键全部让位
+      if (overlayOpenRef.current) return;
       if (e.key === "Escape") {
         // 优先级：网格 → 搜索 → 隐藏面板
         if (view === "grid") {
@@ -201,6 +290,12 @@ export default function App() {
         e.preventDefault();
         return;
       }
+      // grid 排序模式是模态的：禁用 Tab/方向键/Enter 等所有面板快捷键，
+      // 只留 Escape 退出（上面已处理）。Tab 需要 preventDefault 防止焦点跳走。
+      if (view === "grid") {
+        if (e.key === "Tab") e.preventDefault();
+        return;
+      }
       if (searching) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -214,18 +309,17 @@ export default function App() {
         if (it) paste(it);
       } else if (e.key === "Tab") {
         e.preventDefault();
-        setPane((p) => {
-          const next = p === "clipboard" ? "phrases" : "clipboard";
-          setPaneDir(next === "phrases" ? 1 : -1);
-          setView("stack");
-          setQuery("");
-          return next;
-        });
+        const next = pane === "clipboard" ? "phrases" : "clipboard";
+        setPaneDir(next === "phrases" ? 1 : -1);
+        setPane(next);
+        setView("stack");
+        setQuery("");
       }
     }
     // Alt 弹起时重新聚焦，弥补被 WebView2 菜单模式吞掉的焦点
     function onAltUp(e: KeyboardEvent) {
       if (e.key === "Alt") {
+        if (overlayOpenRef.current) return;  // 弹窗内不抢 textarea 焦点
         document.getElementById("root")?.focus({ preventScroll: true });
       }
     }
@@ -279,28 +373,40 @@ export default function App() {
   async function handleEnterGrid() {
     if (isTauri()) {
       try {
-        const { LogicalSize } = await import("@tauri-apps/api/window");
-        await getCurrentWindow().setSize(new LogicalSize(720, 480));
+        await animatePanelSize(720, 480);
       } catch (e) {
         console.error("resize failed", e);
       }
     }
-    // 等 resize 应用到 DOM 后下一帧再挂载网格，炸开动画才有正确容器尺寸
     requestAnimationFrame(() => setView("grid"));
   }
 
-  // 退出网格排序模式：先让网格收拢退出，再恢复面板到 380×320
+  // 退出网格排序模式：先让网格收拢退出，再恢复面板到当前显示模式高度
   async function handleExitGrid() {
     setView("stack");
-    if (isTauri()) {
-      try {
-        // 留一拍让退出动画跑完再缩窗，避免容器骤变小卡顿
-        await new Promise((r) => setTimeout(r, 180));
-        const { LogicalSize } = await import("@tauri-apps/api/window");
-        await getCurrentWindow().setSize(new LogicalSize(380, 320));
-      } catch (e) {
-        console.error("resize failed", e);
+    await ensurePanelSize();
+  }
+
+  // 确保窗口尺寸是当前显示模式对应的标准尺寸（stack=380×320, flow=380×615）。
+  // 不依赖 view state——直接读物理窗口尺寸，若偏离标准（如停留在 grid 的 720×480）
+  // 就动画缩回。用于切 pane、退出 grid 等所有需要恢复窗口尺寸的场景。
+  async function ensurePanelSize() {
+    if (!isTauri()) return;
+    try {
+      const win = getCurrentWindow();
+      const size = await win.outerSize();
+      const factor = await win.scaleFactor();
+      const curW = size.width / factor;
+      const curH = size.height / factor;
+      const targetH = displayModeRef.current === "flow" ? 615 : 320;
+      debugLog(`ensurePanelSize: cur=${curW.toFixed(0)}x${curH.toFixed(0)} target=380x${targetH} dm=${displayModeRef.current}`);
+      if (Math.abs(curW - 380) > 1 || Math.abs(curH - targetH) > 1) {
+        await animatePanelSize(380, targetH);
+        debugLog(`ensurePanelSize: resize done`);
       }
+    } catch (e) {
+      debugLog(`ensurePanelSize: FAILED ${String(e)}`);
+      console.error("ensurePanelSize failed", e);
     }
   }
 
@@ -402,7 +508,11 @@ export default function App() {
               </span>
               <button
                 className="icon-btn"
-                onClick={() => openSettings()}
+                onClick={() => {
+                  // 置标志挡住打开设置窗口导致的首次 blur，避免面板自动隐藏
+                  suppressBlurRef.current = true;
+                  openSettings();
+                }}
                 title="设置"
                 aria-label="设置"
               >
@@ -414,7 +524,6 @@ export default function App() {
           <TopBar
             pane={pane}
             onPane={(p) => {
-              // 记录翻页方向：常用语在右、剪贴板在左，新 pane 在当前之右则 +1
               setPaneDir(p === "phrases" ? 1 : -1);
               setPane(p);
               setView("stack");
@@ -436,6 +545,7 @@ export default function App() {
             themeMode={mode}
             onNewPhrase={handleNewPhrase}
             onEditOrder={handleEnterGrid}
+            hideSwitch={view === "grid"}
           />
           <div className="panel-body">
             {/* 外层：按 pane 抽屉式换页（剪贴板 ↔ 常用语），方向与顶部指示器一致 */}
@@ -451,7 +561,7 @@ export default function App() {
                 style={{ height: "100%", display: "flex", flexDirection: "column" }}
               >
                 {/* 内层：按 view 切换（堆叠 / 搜索 / 网格） */}
-                <AnimatePresence mode="wait">
+                <AnimatePresence mode="wait" custom={dmDir}>
                   {view === "grid" && pane === "phrases" ? (
                     <motion.div
                       key="grid"
@@ -505,30 +615,65 @@ export default function App() {
                     </motion.div>
                   ) : (
                     <motion.div
-                      key="stack"
+                      key={displayMode}
                       className="panel-body-view"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0, scale: 0.94 }}
-                      transition={{ duration: 0.16, ease: easeEnter }}
+                      custom={dmDir}
+                      variants={{
+                        initial: (dir: number) => ({
+                          opacity: 0,
+                          y: 8 * dir,
+                        }),
+                        animate: {
+                          opacity: 1,
+                          y: 0,
+                          transition: { duration: durSlow, ease: easeEnter },
+                        },
+                        exit: (dir: number) => ({
+                          opacity: 0,
+                          y: -6 * dir,
+                          transition: { duration: durBase, ease: easeExit },
+                        }),
+                      }}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
                       style={{ height: "100%" }}
                     >
-                      <CardStack
-                        items={items}
-                        active={active}
-                        onSelect={(i) => paste(items[i])}
-                        onNav={(d) => setActive(active + d)}
-                        onItemContext={(item, e) =>
-                          setMenu({ x: e.clientX, y: e.clientY, item })
-                        }
-                        onItemLongPress={(item) =>
-                          setMenu({
-                            x: window.innerWidth / 2,
-                            y: window.innerHeight / 2,
-                            item,
-                          })
-                        }
-                      />
+                      {displayMode === "flow" ? (
+                        <CardFlow
+                          items={items}
+                          active={active}
+                          onSelect={(i) => paste(items[i])}
+                          onNav={(d) => setActive(active + d)}
+                          onItemContext={(item, e) =>
+                            setMenu({ x: e.clientX, y: e.clientY, item })
+                          }
+                          onItemLongPress={(item) =>
+                            setMenu({
+                              x: window.innerWidth / 2,
+                              y: window.innerHeight / 2,
+                              item,
+                            })
+                          }
+                        />
+                      ) : (
+                        <CardStack
+                          items={items}
+                          active={active}
+                          onSelect={(i) => paste(items[i])}
+                          onNav={(d) => setActive(active + d)}
+                          onItemContext={(item, e) =>
+                            setMenu({ x: e.clientX, y: e.clientY, item })
+                          }
+                          onItemLongPress={(item) =>
+                            setMenu({
+                              x: window.innerWidth / 2,
+                              y: window.innerHeight / 2,
+                              item,
+                            })
+                          }
+                        />
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>

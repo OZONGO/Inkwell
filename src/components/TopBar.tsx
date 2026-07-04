@@ -15,6 +15,8 @@ interface TopBarProps {
   themeMode: "light" | "dark";
   onNewPhrase?: () => void;
   onEditOrder?: () => void;
+  /// grid 排序模式下隐藏分段切换器 + 编辑按钮，只留主题切换
+  hideSwitch?: boolean;
 }
 
 // 分段切换器：layoutId 让高亮指示器在两个选项间物理滑动，
@@ -53,12 +55,13 @@ export function TopBar({
   themeMode,
   onNewPhrase,
   onEditOrder,
+  hideSwitch = false,
 }: TopBarProps) {
   return (
     <div className="topbar">
-      <Segmented pane={pane} onPane={onPane} />
+      {!hideSwitch && <Segmented pane={pane} onPane={onPane} />}
       <div className="topbar-actions">
-        {pane === "clipboard" && (
+        {!hideSwitch && pane === "clipboard" && (
           <motion.div
             className="search-expander"
             animate={{ width: searching ? 168 : 28 }}
@@ -89,7 +92,7 @@ export function TopBar({
             </AnimatePresence>
           </motion.div>
         )}
-        {pane === "phrases" && (
+        {!hideSwitch && pane === "phrases" && (
           <>
             <motion.button
               className="icon-btn"

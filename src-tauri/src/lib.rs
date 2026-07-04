@@ -8,7 +8,7 @@ mod settings;
 mod state;
 
 use std::str::FromStr;
-use tauri::{Emitter, Manager, PhysicalPosition};
+use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
@@ -19,6 +19,18 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::Shell::{ABM_GETTASKBARPOS, APPBARDATA, SHAppBarMessage};
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
+/// 读取当前显示模式对应的面板尺寸 (width, height)
+/// stack → 380×320，flow → 380×615；读设置失败时回退 stack 尺寸
+fn panel_size_for_mode(app: &tauri::AppHandle) -> (i32, i32) {
+    let state = app.state::<state::AppState>();
+    let conn = state.db.lock();
+    let mode = crate::db::get_display_mode(&conn).unwrap_or_else(|_| "stack".to_string());
+    match mode.as_str() {
+        "flow" => (380, 615),
+        _ => (380, 320),
+    }
+}
+
 fn toggle_panel(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("panel") {
         match win.is_visible() {
@@ -26,9 +38,12 @@ fn toggle_panel(app: &tauri::AppHandle) {
                 let _ = win.hide();
             }
             _ => {
-                // 面板定位到鼠标所在显示器的工作区角落（避开任务栏）
+                // 按当前显示模式决定面板尺寸（覆盖上次 grid 等遗留尺寸），
+                // 再定位到鼠标所在显示器的工作区角落（避开任务栏）。
                 // 粘贴目标窗口由 foreground_tracker 后台线程持续记录，无需在此捕获
-                if let Some((x, y)) = compute_panel_position(380, 320) {
+                let (w, h) = panel_size_for_mode(app);
+                let _ = win.set_size(LogicalSize::new(w as f64, h as f64));
+                if let Some((x, y)) = compute_panel_position(w, h) {
                     let _ = win.set_position(PhysicalPosition::new(x, y));
                 }
                 let _ = win.show();
@@ -41,22 +56,25 @@ fn toggle_panel(app: &tauri::AppHandle) {
 }
 
 /// 切换设置窗口可见性：已显示则隐藏，否则显示并聚焦
+/// 同时 emit settings-visibility 事件，让面板据此决定是否抑制 blur 自动隐藏
 fn toggle_settings(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("settings") {
         match win.is_visible() {
             Ok(true) => {
                 let _ = win.hide();
+                let _ = app.emit_to("panel", "settings-visibility", false);
             }
             _ => {
                 let _ = win.show();
                 let _ = win.set_focus();
+                let _ = app.emit_to("panel", "settings-visibility", true);
             }
         }
     }
 }
 
 /// 计算面板位置：取鼠标所在显示器的工作区，按任务栏边定位面板到角落
-fn compute_panel_position(panel_width: i32, panel_height: i32) -> Option<(i32, i32)> {
+pub(crate) fn compute_panel_position(panel_width: i32, panel_height: i32) -> Option<(i32, i32)> {
     unsafe {
         let mut cursor = POINT { x: 0, y: 0 };
         if GetCursorPos(&mut cursor).is_err() {
@@ -114,6 +132,19 @@ pub fn run() {
                         if Some(triggered_id) == panel_id {
                             toggle_panel(app);
                         } else if Some(triggered_id) == search_id {
+                            // Alt+C：面板隐藏时先显示再开搜索
+                            if let Some(win) = app.get_webview_window("panel") {
+                                if !win.is_visible().unwrap_or(false) {
+                                    let (w, h) = panel_size_for_mode(app);
+                                    let _ = win.set_size(LogicalSize::new(w as f64, h as f64));
+                                    if let Some((x, y)) = compute_panel_position(w, h) {
+                                        let _ = win.set_position(PhysicalPosition::new(x, y));
+                                    }
+                                    let _ = win.show();
+                                    let _ = win.set_focus();
+                                    let _ = app.emit_to("panel", "panel-shown", ());
+                                }
+                            }
                             let _ = app.emit_to("panel", "toggle-search", ());
                         }
                     }
@@ -234,6 +265,8 @@ pub fn run() {
             settings::set_setting,
             settings::set_autostart,
             commands::open_settings,
+            commands::reposition_panel,
+            commands::debug_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

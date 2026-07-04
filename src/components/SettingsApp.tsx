@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { emit, listen } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import { getSettings, setSetting, setAutostart } from "../lib/tauri";
+import { springUI } from "../lib/motion";
+import type { DisplayMode } from "../lib/types";
 
 type AccentValue = "blue" | "green" | "orple" | "red";
 
@@ -33,6 +36,7 @@ function resolveTheme(value: string | undefined): "light" | "dark" {
 export function SettingsApp() {
   const [loaded, setLoaded] = useState(false);
   const [accent, setAccent] = useState<AccentValue>("blue");
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("stack");
   const [maxItems, setMaxItems] = useState(50);
   const [autostart, setAutostartState] = useState(false);
 
@@ -46,6 +50,7 @@ export function SettingsApp() {
         if (cancelled) return;
         const a = (s.accent as AccentValue) ?? "blue";
         setAccent(a);
+        setDisplayMode(s.display_mode === "flow" ? "flow" : "stack");
         setMaxItems(Number(s.max_items ?? "50"));
         setAutostartState((s.autostart ?? "off") === "on");
         document.documentElement.setAttribute("data-theme", resolveTheme(s.theme));
@@ -98,6 +103,17 @@ export function SettingsApp() {
     }
   }
 
+  async function handleDisplayModeChange(next: DisplayMode) {
+    setDisplayMode(next);
+    try {
+      await setSetting("display_mode", next);
+      // 广播给面板，触发 resize 动画 + 内容切换
+      await emit("display-mode-changed", next);
+    } catch (e) {
+      console.error("set display_mode failed", e);
+    }
+  }
+
   if (!loaded) {
     return (
       <div className="settings-root">
@@ -129,6 +145,33 @@ export function SettingsApp() {
               />
             ))}
           </div>
+        </section>
+
+        {/* 显示模式 */}
+        <section className="settings-section">
+          <h2 className="settings-section-title">显示模式</h2>
+          <div className="seg">
+            {(["stack", "flow"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={"seg-btn" + (displayMode === m ? " on" : "")}
+                onClick={() => handleDisplayModeChange(m)}
+              >
+                {displayMode === m && (
+                  <motion.div
+                    layoutId="dm-indicator"
+                    className="seg-indicator"
+                    transition={springUI}
+                  />
+                )}
+                <span className="seg-label">{m === "stack" ? "堆叠" : "卡片流"}</span>
+              </button>
+            ))}
+          </div>
+          <p className="settings-hint">
+            堆叠：最新卡片在前，滚轮翻动；卡片流：纵向列表，等宽等高。
+          </p>
         </section>
 
         {/* 保持条数 */}

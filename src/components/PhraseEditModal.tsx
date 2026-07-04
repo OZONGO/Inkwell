@@ -6,7 +6,7 @@ interface PhraseEditModalProps {
   open: boolean;
   title: string;
   initialValue?: string;
-  onConfirm: (text: string) => void;
+  onConfirm: (text: string) => void | Promise<void>;
   onCancel: () => void;
 }
 
@@ -21,20 +21,30 @@ export function PhraseEditModal({
   onCancel,
 }: PhraseEditModalProps) {
   const [value, setValue] = useState(initialValue);
+  const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // ref 镜像 submitting，避免 handleKey 闭包读到旧值导致重复提交
+  const submittingRef = useRef(false);
 
   // 打开时重置为初始值并聚焦输入框（延迟一帧确保 DOM 已挂载）
+  // 编辑模式（initialValue 非空）自动全选，方便整段替换
   useEffect(() => {
     if (open) {
       setValue(initialValue);
-      const id = requestAnimationFrame(() => textareaRef.current?.focus());
+      setSubmitting(false);
+      submittingRef.current = false;
+      const id = requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        if (initialValue) ta.select();
+      });
       return () => cancelAnimationFrame(id);
     }
   }, [open, initialValue]);
 
   // 弹窗打开时阻止 wheel 冒泡到面板（避免卡片滚动）。
-  // keydown 不在这里拦截——改由 modal 容器在 bubble 阶段 stopPropagation，
-  // 既阻止 App 全局 listener 收到方向键，又不影响 textarea 自己的 onKeyDown。
+  // 键盘事件由 App 的全局 onKey 读 overlayOpenRef 让位，无需在此拦截。
   useEffect(() => {
     if (!open) return;
     function stopWheel(e: Event) {
@@ -50,39 +60,43 @@ export function PhraseEditModal({
     // Ctrl/Cmd+Enter 提交，普通 Enter 换行（大段文本友好）
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      const v = value.trim();
-      if (v) onConfirm(v);
+      void confirm();
     } else if (e.key === "Escape") {
       e.preventDefault();
-      onCancel();
+      if (!submittingRef.current) onCancel();
     }
   }
 
-  function confirm() {
+  async function confirm() {
     const v = value.trim();
-    if (v) onConfirm(v);
+    if (!v || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await onConfirm(v);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
 
   return (
     <AnimatePresence>
       {open ? (
         <motion.div
-          className="modal-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: durFast, ease: easeOut }}
-          onClick={onCancel}
-        >
+            className="modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: durFast, ease: easeOut }}
+            onClick={() => { if (!submitting) onCancel(); }}
+          >
           <motion.div
             className="modal"
             initial={overlayPop.initial}
             animate={overlayPop.animate}
             exit={overlayPop.exit}
             onClick={(e) => e.stopPropagation()}
-            // bubble 阶段拦截：textarea 处理完按键后，事件冒泡到这里被挡住，
-            // 不再传到 window 上 App 的全局 keydown（否则方向键会滚动卡片）
-            onKeyDown={(e) => e.stopPropagation()}
           >
             <div className="modal-title">{title}</div>
             <textarea
@@ -100,6 +114,7 @@ export function PhraseEditModal({
                 className="modal-btn"
                 whileTap={whileTap}
                 onClick={onCancel}
+                disabled={submitting}
               >
                 取消
               </motion.button>
@@ -107,8 +122,9 @@ export function PhraseEditModal({
                 className="modal-btn primary"
                 whileTap={whileTap}
                 onClick={confirm}
+                disabled={!value.trim() || submitting}
               >
-                确定
+                {submitting ? "…" : "确定"}
               </motion.button>
             </div>
           </motion.div>
