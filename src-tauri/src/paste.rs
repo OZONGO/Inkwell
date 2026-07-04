@@ -5,7 +5,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
     VK_CONTROL, VK_V,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, SetForegroundWindow};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+};
 
 use clipboard_win::raw;
 use tauri::{AppHandle, Manager};
@@ -18,8 +20,13 @@ pub fn do_paste(
     id: i64,
     shift: bool,
 ) -> Result<(), String> {
-    // 1. 写文本到剪贴板（CF_UNICODETEXT）
-    raw::set_string(&text).map_err(|e| format!("set clipboard failed: {}", e))?;
+    // 1. 写文本到剪贴板（CF_UNICODETEXT）—— raw::set_string 不自行打开剪贴板，需先 OpenClipboard
+    {
+        let _clip = clipboard_win::Clipboard::new_attempts(10)
+            .map_err(|e| format!("open clipboard failed: {e}"))?;
+        clipboard_win::raw::empty().map_err(|e| format!("empty clipboard failed: {e}"))?;
+        raw::set_string(&text).map_err(|e| format!("set clipboard failed: {e}"))?;
+    }
 
     // 2. 设自粘贴抑制标记：500ms 内同文本会被 listener 跳过
     {
@@ -27,41 +34,17 @@ pub fn do_paste(
         *last = Some((text.clone(), Instant::now()));
     }
 
-    // 3. 抢回前台窗口焦点
+    // 3. hide 面板让系统把前台还给目标窗口 → 等目标成为前台 → Ctrl+V（Shift 时粘贴后重显面板）
     let target = state.get_target_hwnd();
     if target == 0 {
         return Err("no target window captured".into());
     }
-    let target_hwnd = HWND(target as *mut core::ffi::c_void);
+    paste_to_target(app, HWND(target as *mut core::ffi::c_void), shift)?;
 
-    let current_thread_id = unsafe { GetCurrentThreadId() };
-    let target_thread_id = unsafe { GetWindowThreadProcessId(target_hwnd, None) };
-
-    // 4. AttachThreadInput 把目标窗口线程的输入队列 attach 到当前线程，让 SetForegroundWindow 可靠
-    let attached = unsafe { AttachThreadInput(current_thread_id, target_thread_id, true) };
-    let _ = unsafe { SetForegroundWindow(target_hwnd) };
-    // 短暂让出，确保目标窗口进入前台
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    // 5. SendInput 4 个 INPUT：Ctrl down / V down / V up / Ctrl up
-    send_ctrl_v();
-
-    // 6. detach 输入队列
-    if attached.as_bool() {
-        let _ = unsafe { AttachThreadInput(current_thread_id, target_thread_id, false) };
-    }
-
-    // 7. 置顶剪贴板条目
+    // 4. 置顶剪贴板条目
     {
         let conn = state.db.lock();
         crate::db::move_clipboard_to_first(&conn, id)?;
-    }
-
-    // 8. 隐藏面板（除非 Shift 按下保持打开）
-    if !shift {
-        if let Some(win) = app.get_webview_window("panel") {
-            let _ = win.hide();
-        }
     }
     Ok(())
 }
@@ -100,30 +83,70 @@ pub fn do_paste_image(
             .map_err(|e| format!("set CF_DIB failed: {}", e))?;
     }
 
-    // 2. 抢回前台焦点（与 do_paste 一致）
+    // 2. hide 面板让系统把前台还给目标窗口 → 等目标成为前台 → Ctrl+V（与 do_paste 一致）
     let target = state.get_target_hwnd();
     if target == 0 {
         return Err("no target window captured".into());
     }
-    let target_hwnd = HWND(target as *mut core::ffi::c_void);
-    let current_thread_id = unsafe { GetCurrentThreadId() };
-    let target_thread_id = unsafe { GetWindowThreadProcessId(target_hwnd, None) };
-    let attached = unsafe { AttachThreadInput(current_thread_id, target_thread_id, true) };
-    let _ = unsafe { SetForegroundWindow(target_hwnd) };
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    send_ctrl_v();
-    if attached.as_bool() {
-        let _ = unsafe { AttachThreadInput(current_thread_id, target_thread_id, false) };
-    }
+    paste_to_target(app, HWND(target as *mut core::ffi::c_void), shift)?;
 
-    // 3. 置顶 + 隐藏面板
+    // 3. 置顶
     {
         let conn = state.db.lock();
         crate::db::move_clipboard_to_first(&conn, id)?;
     }
-    if !shift {
-        if let Some(win) = app.get_webview_window("panel") {
-            let _ = win.hide();
+    Ok(())
+}
+
+/// 让目标窗口获得前台并模拟 Ctrl+V 粘贴。
+///
+/// 思路：先 `hide` 面板，由 Windows 按默认行为把前台还给上一个前台窗口（目标）——
+/// 这正是「关闭面板后光标自动回到输入框」的机制，比 `SetForegroundWindow` 可靠
+/// （后者受前台锁限制，从命令工作线程调用常被静默拒绝）。
+/// hide 后轮询确认目标已成为前台再 `SendInput`；超时则用 `AttachThreadInput`
+/// 附加到当前前台线程获取权限，兜底 `SetForegroundWindow`。
+/// Shift 粘贴：粘贴完成后重新显示面板。
+fn paste_to_target(app: &AppHandle, target_hwnd: HWND, shift: bool) -> Result<(), String> {
+    let panel = app.get_webview_window("panel");
+
+    // 1. hide 面板：触发系统把前台还给目标窗口
+    if let Some(win) = &panel {
+        let _ = win.hide();
+    }
+
+    // 2. 轮询等待目标窗口成为前台（hide 异步派发 + 系统还前台需时，最多 200ms）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+    let mut foregrounded = false;
+    while std::time::Instant::now() < deadline {
+        if unsafe { GetForegroundWindow() } == target_hwnd {
+            foregrounded = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    // 3. 兜底：系统没还前台时，附加到当前前台线程获取权限再 SetForegroundWindow
+    if !foregrounded {
+        let current_tid = unsafe { GetCurrentThreadId() };
+        let fg_hwnd = unsafe { GetForegroundWindow() };
+        let fg_tid = unsafe { GetWindowThreadProcessId(fg_hwnd, None) };
+        let attached = current_tid != fg_tid
+            && unsafe { AttachThreadInput(current_tid, fg_tid, true) }.as_bool();
+        let _ = unsafe { SetForegroundWindow(target_hwnd) };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        if attached {
+            let _ = unsafe { AttachThreadInput(current_tid, fg_tid, false) };
+        }
+    }
+
+    // 4. 模拟 Ctrl+V
+    send_ctrl_v();
+
+    // 5. Shift 粘贴：重新显示并聚焦面板
+    if shift {
+        if let Some(win) = &panel {
+            let _ = win.show();
+            let _ = win.set_focus();
         }
     }
     Ok(())
