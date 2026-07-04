@@ -109,6 +109,14 @@
   flex-direction: column;
   overflow: hidden;
 }
+/* AnimatePresence 包裹的视图容器：必须撑满并作为卡片绝对定位的上下文 */
+.panel-body-view {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
 .stack {
   position: relative;
   flex: 1;
@@ -311,11 +319,13 @@
 .phrase-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+  gap: 12px; /* 与 PhraseGrid cellH=92 (80+12) 对齐 */
   padding: 4px 0 8px;
   overflow-y: auto;
+  overflow-x: hidden; /* 卡片固定宽，不需要横向滚动 */
   list-style: none;
   margin: 0;
+  position: relative; /* 让拖拽落点坐标稳定 */
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--graphite) 35%, transparent) transparent;
 }
@@ -326,8 +336,11 @@
   background: color-mix(in srgb, var(--graphite) 35%, transparent);
   border-radius: 3px;
 }
+.phrase-grid::-webkit-scrollbar:horizontal {
+  display: none; /* 隐藏横向滚动条 */
+}
 .phrase-grid-cell {
-  height: 80px;
+  height: 80px; /* + 12px gap = 92，与 PhraseGrid cellH 对齐 */
   padding: 10px 12px;
   background: var(--card);
   border: 1px solid var(--hairline);
@@ -338,6 +351,8 @@
   cursor: grab;
   user-select: none;
   touch-action: none;
+  position: relative;
+  will-change: transform;
 }
 .phrase-grid-cell:active {
   cursor: grabbing;
@@ -399,7 +414,8 @@
   justify-content: center;
 }
 .modal {
-  width: 280px;
+  width: 300px;
+  max-height: 80vh;
   background: var(--card);
   border: 1px solid var(--hairline);
   border-radius: var(--r-card);
@@ -417,21 +433,37 @@
 }
 .modal-input {
   width: 100%;
+  min-height: 96px;
+  max-height: 220px;
+  resize: vertical;
   border: 1px solid var(--hairline);
   border-radius: 8px;
   background: var(--paper);
   padding: 8px 10px;
   font: inherit;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--ink);
   outline: none;
   transition: border-color var(--dur-fast) var(--ease-out);
+  font-family: var(--font-mono), monospace;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--graphite) 35%, transparent) transparent;
 }
 .modal-input:focus {
   border-color: var(--accent);
 }
 .modal-input::placeholder {
   color: var(--graphite);
+}
+.modal-hint {
+  font-size: 10.5px;
+  color: var(--graphite);
+  letter-spacing: 0.02em;
+  text-align: right;
+  margin-top: -4px;
+  opacity: 0.8;
 }
 .modal-actions {
   display: flex;

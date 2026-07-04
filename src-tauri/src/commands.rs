@@ -24,27 +24,44 @@ pub fn paste_item(
     app: tauri::AppHandle,
     id: String,
     shift: bool,
+    from_phrases: bool,
 ) -> Result<(), String> {
     let id = id.parse::<i64>().map_err(|e| e.to_string())?;
-    // 按 kind 分派：text 走文本粘贴，image 走图片粘贴
-    let kind: String = {
-        let conn = state.db.lock();
-        conn.query_row(
-            "SELECT kind FROM clipboard_items WHERE id = ?",
-            rusqlite::params![id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?
-    };
-    if kind == "image" {
-        return crate::paste::do_paste_image(&state, &app, id, shift);
+
+    if from_phrases {
+        // 常用语：从 phrases 表取文本直接粘贴，不置顶
+        let text = {
+            let conn = state.db.lock();
+            conn.query_row(
+                "SELECT text FROM phrases WHERE id = ?",
+                rusqlite::params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|e| format!("常用语未找到: {}", e))?
+        };
+        // 常用语仅有纯文本，不走图片分支；move_to_first = false 不重排
+        crate::paste::do_paste(&state, &app, text, id, shift, false)
+    } else {
+        // 剪贴板：按 kind 分派 text / image
+        let kind: String = {
+            let conn = state.db.lock();
+            conn.query_row(
+                "SELECT kind FROM clipboard_items WHERE id = ?",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?
+        };
+        if kind == "image" {
+            return crate::paste::do_paste_image(&state, &app, id, shift);
+        }
+        let text = {
+            let conn = state.db.lock();
+            db::get_clipboard_text(&conn, id)?
+                .ok_or_else(|| "clipboard item not found".to_string())?
+        };
+        crate::paste::do_paste(&state, &app, text, id, shift, true)
     }
-    let text = {
-        let conn = state.db.lock();
-        db::get_clipboard_text(&conn, id)?
-            .ok_or_else(|| "clipboard item not found".to_string())?
-    };
-    crate::paste::do_paste(&state, &app, text, id, shift)
 }
 
 #[tauri::command]

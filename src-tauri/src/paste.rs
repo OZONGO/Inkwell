@@ -13,12 +13,15 @@ use clipboard_win::raw;
 use tauri::{AppHandle, Manager};
 
 /// 执行粘贴：写剪贴板 → 设自粘贴抑制 → 抢回前台 → SendInput Ctrl+V → 置顶 → 隐藏面板（如 !shift）
+///
+/// `move_to_first` 控制粘贴后是否将该条置顶（剪贴板需要，常用语不需要）。
 pub fn do_paste(
     state: &crate::state::AppState,
     app: &AppHandle,
     text: String,
     id: i64,
     shift: bool,
+    move_to_first: bool,
 ) -> Result<(), String> {
     // 1. 写文本到剪贴板（CF_UNICODETEXT）—— raw::set_string 不自行打开剪贴板，需先 OpenClipboard
     {
@@ -41,10 +44,12 @@ pub fn do_paste(
     }
     paste_to_target(app, HWND(target as *mut core::ffi::c_void), shift)?;
 
-    // 4. 置顶剪贴板条目
-    {
-        let conn = state.db.lock();
-        crate::db::move_clipboard_to_first(&conn, id)?;
+    // 4. 置顶剪贴板条目（仅剪贴板使用，常用语不重排）
+    if move_to_first {
+        {
+            let conn = state.db.lock();
+            crate::db::move_clipboard_to_first(&conn, id)?;
+        }
     }
     Ok(())
 }

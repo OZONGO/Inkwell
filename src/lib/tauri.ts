@@ -14,9 +14,9 @@ export async function listPhrases(): Promise<ClipItem[]> {
   return invoke<ClipItem[]>("list_phrases");
 }
 
-export async function pasteItem(id: string, shift: boolean): Promise<void> {
+export async function pasteItem(id: string, shift: boolean, from_phrases: boolean = false): Promise<void> {
   if (!isTauri()) return;
-  await invoke("paste_item", { id, shift });
+  await invoke("paste_item", { id, shift, fromPhrases: from_phrases });
 }
 
 export async function deleteClipboardItem(id: string): Promise<void> {

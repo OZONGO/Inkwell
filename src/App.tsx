@@ -170,7 +170,7 @@ export default function App() {
       });
       setActiveByPane((p) => ({ ...p, clipboard: 0 }));
     }
-    pasteItem(item.id, shift).catch((e) => console.error("paste failed", e));
+    pasteItem(item.id, shift, pane === "phrases").catch((e) => console.error("paste failed", e));
   }
 
   useEffect(() => {
@@ -254,9 +254,9 @@ export default function App() {
     });
   }
 
-  // 进入网格排序模式：切视图 + 放大面板到 720×480
+  // 进入网格排序模式：先放大面板到 720×480，待尺寸生效后再切视图，
+  // 让 PhraseGrid 的 initial（缩小堆叠态）在已放大的容器里炸开飞散到网格位。
   async function handleEnterGrid() {
-    setView("grid");
     if (isTauri()) {
       try {
         const { LogicalSize } = await import("@tauri-apps/api/window");
@@ -265,13 +265,17 @@ export default function App() {
         console.error("resize failed", e);
       }
     }
+    // 等 resize 应用到 DOM 后下一帧再挂载网格，炸开动画才有正确容器尺寸
+    requestAnimationFrame(() => setView("grid"));
   }
 
-  // 退出网格排序模式：切回 stack + 恢复面板到 380×320
+  // 退出网格排序模式：先让网格收拢退出，再恢复面板到 380×320
   async function handleExitGrid() {
     setView("stack");
     if (isTauri()) {
       try {
+        // 留一拍让退出动画跑完再缩窗，避免容器骤变小卡顿
+        await new Promise((r) => setTimeout(r, 180));
         const { LogicalSize } = await import("@tauri-apps/api/window");
         await getCurrentWindow().setSize(new LogicalSize(380, 320));
       } catch (e) {
@@ -384,32 +388,64 @@ export default function App() {
             onEditOrder={handleEnterGrid}
           />
           <div className="panel-body">
-            {view === "grid" && pane === "phrases" ? (
-              <PhraseGrid
-                items={phrases}
-                onReorder={handlePhraseReorder}
-                onExit={handleExitGrid}
-              />
-            ) : searching ? (
-              <SearchView items={searchResults} onSelect={paste} />
-            ) : (
-              <CardStack
-                items={items}
-                active={active}
-                onSelect={(i) => paste(items[i])}
-                onNav={(d) => setActive(active + d)}
-                onItemContext={(item, e) =>
-                  setMenu({ x: e.clientX, y: e.clientY, item })
-                }
-                onItemLongPress={(item) =>
-                  setMenu({
-                    x: window.innerWidth / 2,
-                    y: window.innerHeight / 2,
-                    item,
-                  })
-                }
-              />
-            )}
+            <AnimatePresence mode="wait">
+              {view === "grid" && pane === "phrases" ? (
+                <motion.div
+                  key="grid"
+                  className="panel-body-view"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  transition={{ duration: 0.18, ease: [0.22, 0.61, 0.36, 1] }}
+                  style={{ height: "100%", display: "flex", flexDirection: "column" }}
+                >
+                  <PhraseGrid
+                    items={phrases}
+                    onReorder={handlePhraseReorder}
+                    onExit={handleExitGrid}
+                  />
+                </motion.div>
+              ) : searching ? (
+                <motion.div
+                  key="search"
+                  className="panel-body-view"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.14 }}
+                  style={{ height: "100%" }}
+                >
+                  <SearchView items={searchResults} onSelect={paste} />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="stack"
+                  className="panel-body-view"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0, scale: 0.94 }}
+                  transition={{ duration: 0.16, ease: [0.22, 0.61, 0.36, 1] }}
+                  style={{ height: "100%" }}
+                >
+                  <CardStack
+                    items={items}
+                    active={active}
+                    onSelect={(i) => paste(items[i])}
+                    onNav={(d) => setActive(active + d)}
+                    onItemContext={(item, e) =>
+                      setMenu({ x: e.clientX, y: e.clientY, item })
+                    }
+                    onItemLongPress={(item) =>
+                      setMenu({
+                        x: window.innerWidth / 2,
+                        y: window.innerHeight / 2,
+                        item,
+                      })
+                    }
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </Panel>
       </AnimatePresence>
