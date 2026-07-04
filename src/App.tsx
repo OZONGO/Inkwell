@@ -10,6 +10,7 @@ import { CardStack } from "./components/CardStack";
 import { SearchView } from "./components/SearchView";
 import { PhraseGrid } from "./components/PhraseGrid";
 import { ContextMenu, type ContextMenuItem } from "./components/ContextMenu";
+import { PhraseEditModal } from "./components/PhraseEditModal";
 import { useTheme, type ThemeMode } from "./lib/theme";
 import {
   listClipboard,
@@ -44,6 +45,11 @@ export default function App() {
   const [flash, setFlash] = useState<string | null>(null);
   const flashTimer = useRef<number | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; item: ClipItem } | null>(null);
+  const [phraseModal, setPhraseModal] = useState<{
+    title: string;
+    initialValue: string;
+    onConfirm: (text: string) => void;
+  } | null>(null);
 
   const items = pane === "clipboard" ? clip : phrases;
   const active = Math.min(activeByPane[pane], Math.max(0, items.length - 1));
@@ -231,16 +237,21 @@ export default function App() {
     return `${phrases.length} 条 · Tab 剪贴板`;
   })();
 
-  // 新建常用语：弹窗输入文本，调用后端追加，并更新本地状态
-  async function handleNewPhrase() {
-    const text = window.prompt("新建常用语", "");
-    if (!text || !text.trim()) return;
-    try {
-      const item = await newPhrase(text.trim());
-      setPhrases((prev) => [...prev, item]);
-    } catch (e) {
-      console.error("new phrase failed", e);
-    }
+  // 新建常用语：打开自定义弹窗输入文本，确认后调用后端追加并更新本地状态
+  function handleNewPhrase() {
+    setPhraseModal({
+      title: "新建常用语",
+      initialValue: "",
+      onConfirm: async (text) => {
+        try {
+          const item = await newPhrase(text);
+          setPhrases((prev) => [...prev, item]);
+        } catch (e) {
+          console.error("new phrase failed", e);
+        }
+        setPhraseModal(null);
+      },
+    });
   }
 
   // 进入网格排序模式：切视图 + 放大面板到 720×480
@@ -313,12 +324,19 @@ export default function App() {
       {
         label: "修改",
         action: () => {
-          const next = window.prompt("编辑常用语", item.text || "");
-          if (next && next.trim()) {
-            editPhrase(item.id, next.trim()).then(() =>
-              listPhrases().then(setPhrases),
-            );
-          }
+          setPhraseModal({
+            title: "编辑常用语",
+            initialValue: item.text || "",
+            onConfirm: async (text) => {
+              try {
+                await editPhrase(item.id, text);
+                listPhrases().then(setPhrases);
+              } catch (e) {
+                console.error("edit phrase failed", e);
+              }
+              setPhraseModal(null);
+            },
+          });
         },
       },
       {
@@ -420,6 +438,14 @@ export default function App() {
           />
         ) : null}
       </AnimatePresence>
+
+      <PhraseEditModal
+        open={phraseModal !== null}
+        title={phraseModal?.title ?? ""}
+        initialValue={phraseModal?.initialValue ?? ""}
+        onConfirm={(text) => phraseModal?.onConfirm(text)}
+        onCancel={() => setPhraseModal(null)}
+      />
     </div>
   );
 }

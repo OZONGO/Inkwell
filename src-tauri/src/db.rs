@@ -273,7 +273,8 @@ pub fn delete_clipboard_item(conn: &Connection, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// 将剪贴板条目移入常用语；图片条目不允许移入
+/// 将剪贴板条目移入常用语；图片条目不允许移入。
+/// 移入 = 复制到常用语，原剪贴板条目保留（用户可在剪贴板里继续使用或手动删除）
 pub fn move_clipboard_to_phrases(conn: &Connection, id: i64) -> Result<(), String> {
     let (kind, text): (String, Option<String>) = conn
         .query_row(
@@ -287,7 +288,6 @@ pub fn move_clipboard_to_phrases(conn: &Connection, id: i64) -> Result<(), Strin
     }
     let text = text.ok_or_else(|| "clipboard item has no text".to_string())?;
     new_phrase(conn, &text)?;
-    delete_clipboard_item(conn, id)?;
     Ok(())
 }
 
