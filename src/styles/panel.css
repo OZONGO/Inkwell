@@ -1,7 +1,18 @@
 /* Panel + cards + search — the carbon-copy visual identity */
 
-.stage {
+.stage-outer {
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* .stage 固定按 380×设计高布局（CSS 变量 --panel-h 由 JS 设），
+   JS 再用 CSS zoom 把整个 stage 缩放到实际窗口逻辑尺寸，
+   使面板内容不跟随系统 DPI 缩放膨胀（方案 B）。 */
+.stage {
+  width: var(--panel-w, 380px);
+  height: var(--panel-h, 320px);
   display: flex;
   flex-direction: column;
   align-items: center;

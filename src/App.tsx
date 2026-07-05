@@ -1,5 +1,5 @@
 import { flushSync } from "react-dom";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
@@ -66,6 +66,12 @@ export default function App() {
   // 显示模式切换方向：flow 比 stack 高，切到 flow 时 +1（内容从下方进入），
   // 切回 stack 时 -1（内容从上方进入），与窗口向下生长/向上收缩的方向感一致
   const [dmDir, setDmDir] = useState<1 | -1>(1);
+  // 面板 zoom 因子：窗口逻辑宽 / 设计宽（stack/flow=380，grid=720）。
+  // Rust 端按屏幕工作区比例设窗口物理尺寸，前端用 CSS zoom 把固定设计的 .stage
+  // 缩放到实际窗口逻辑尺寸，使面板内容不跟随系统 DPI 缩放膨胀（方案 B）。
+  const [panelZoom, setPanelZoom] = useState(1);
+  const panelZoomRef = useRef(1);
+  panelZoomRef.current = panelZoom;
   // suppressBlurRef：点齿轮按钮时置 true，挡住打开设置窗口导致的首次 blur
   // settingsVisibleRef：设置窗口可见期间持续为 true，挡住后续 blur
   const suppressBlurRef = useRef(false);
@@ -109,6 +115,19 @@ export default function App() {
   function hidePanel() {
     // 不直接 win.hide()，先触发 Panel 退出动画，由下方 useEffect 延迟 hide
     setPanelHidden(true);
+  }
+
+  // 读窗口逻辑尺寸，算 zoom = 逻辑宽 / 设计宽（stack/flow=380，grid=720）。
+  // Rust 端按屏幕工作区比例设物理尺寸，逻辑宽 = 物理 / scale_factor；
+  // zoom 让 .stage 固定设计尺寸缩放到实际窗口逻辑尺寸，面板不跟随 DPI 膨胀（方案 B）。
+  async function refreshPanelZoom() {
+    if (!isTauri()) return;
+    const win = getCurrentWindow();
+    const size = await win.outerSize();
+    const factor = await win.scaleFactor();
+    const logicalW = size.width / factor;
+    const designW = viewRef.current === "grid" ? 720 : 380;
+    setPanelZoom(logicalW / designW);
   }
 
   // panelHidden 触发时，等 Panel 退出动画（durBase 180ms）跑完再 win.hide()。
@@ -174,6 +193,8 @@ export default function App() {
       setMenu(null);
       setPhraseModal(null);
       setPanelHidden(false);  // 重新进场（取消挂起的 hide 定时器）
+      // Rust 端刚 set_size，延迟一帧再读实际窗口尺寸算 zoom
+      requestAnimationFrame(() => refreshPanelZoom());
       // 同步显示模式（用户可能在设置里改过）；Rust 端已按 settings 尺寸 resize 窗口
       getSettings().then((s) => setDisplayMode(s.display_mode === "flow" ? "flow" : "stack"));
       listClipboard().then(setClip);
@@ -220,7 +241,7 @@ export default function App() {
       // 只更新 state，退出 grid 时 handleExitGrid 按新 displayMode 恢复高度
       if (visible && viewRef.current !== "grid") {
         const toH = next === "flow" ? 615 : 320;
-        animatePanelHeight(toH, 260).catch((err) =>
+        animatePanelHeight(toH, 260, panelZoomRef.current).catch((err) =>
           debugLog(`dm-changed: animatePanelHeight FAILED ${String(err)}`),
         );
       } else {
@@ -432,6 +453,11 @@ export default function App() {
   const footerKey = `${pane}:${view}:${searching ? query : ""}:${clip.length}:${phrases.length}`;
   const footerDir = paneDir;
 
+  // 面板设计尺寸（.stage 固定布局尺寸，JS 用 CSS zoom 缩放到实际窗口逻辑尺寸）。
+  // stack/flow=380×320/615，grid=720×480（网格排序暂不按屏幕比例，保持固定逻辑尺寸）。
+  const panelDesignW = view === "grid" ? 720 : 380;
+  const panelDesignH = view === "grid" ? 480 : displayMode === "flow" ? 615 : 320;
+
   // 新建常用语：打开自定义弹窗输入文本，确认后调用后端追加并更新本地状态。
   // 记录 + 按钮位置，弹窗从按钮位置扩展出来（originRect 驱动 PhraseEditModal 进场动画）。
   function handleNewPhrase(e: MouseEvent<HTMLButtonElement>) {
@@ -457,7 +483,7 @@ export default function App() {
   async function handleEnterGrid() {
     if (isTauri()) {
       try {
-        await animatePanelSize(720, 480);
+        await animatePanelSize(720, 480, 260, panelZoomRef.current);
       } catch (e) {
         console.error("resize failed", e);
       }
@@ -482,10 +508,13 @@ export default function App() {
       const factor = await win.scaleFactor();
       const curW = size.width / factor;
       const curH = size.height / factor;
-      const targetH = displayModeRef.current === "flow" ? 615 : 320;
-      debugLog(`ensurePanelSize: cur=${curW.toFixed(0)}x${curH.toFixed(0)} target=380x${targetH} dm=${displayModeRef.current}`);
-      if (Math.abs(curW - 380) > 1 || Math.abs(curH - targetH) > 1) {
-        await animatePanelSize(380, targetH);
+      const zoom = panelZoomRef.current;
+      const designH = displayModeRef.current === "flow" ? 615 : 320;
+      const targetW = 380 * zoom;
+      const targetH = designH * zoom;
+      debugLog(`ensurePanelSize: cur=${curW.toFixed(0)}x${curH.toFixed(0)} target=${targetW.toFixed(0)}x${targetH.toFixed(0)} dm=${displayModeRef.current}`);
+      if (Math.abs(curW - targetW) > 1 || Math.abs(curH - targetH) > 1) {
+        await animatePanelSize(380, designH, 260, zoom);
         debugLog(`ensurePanelSize: resize done`);
       }
     } catch (e) {
@@ -571,7 +600,14 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-    <div className="stage">
+    <div className="stage-outer">
+      <div
+        className="stage"
+        style={{
+          zoom: panelZoom,
+          ...({ "--panel-w": `${panelDesignW}px`, "--panel-h": `${panelDesignH}px` } as CSSProperties),
+        }}
+      >
       <AnimatePresence>
         <Panel
           key="panel"
@@ -797,6 +833,7 @@ export default function App() {
           </div>
         </Panel>
       </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {flash ? (

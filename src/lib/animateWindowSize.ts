@@ -31,10 +31,12 @@ export async function resizeWithBottomFixed(logicalW: number, logicalH: number):
 }
 
 /**
- * 动画化窗口高度，保持底部固定（宽度固定 380）。
+ * 动画化窗口高度，保持底部固定（宽度固定 380×zoom）。
+ * 接收设计高度 designH，目标逻辑高 = designH × zoom（方案 B：面板按屏幕比例缩放，
+ * zoom 由调用方传入，= 窗口逻辑宽 / 380）。
  * 可中断：若启动时已有动画进行中，旧动画的 tick 自行停止。
  */
-export async function animatePanelHeight(toH: number, durationMs = 260): Promise<void> {
+export async function animatePanelHeight(designH: number, durationMs = 260, zoom = 1): Promise<void> {
   const myId = ++currentAnimId;
   const win = getCurrentWindow();
   const pos = await win.outerPosition();
@@ -42,6 +44,8 @@ export async function animatePanelHeight(toH: number, durationMs = 260): Promise
   const bottomPx = pos.y + size.height;
   const factor = await win.scaleFactor();
   const fromH = size.height / factor;
+  const toH = designH * zoom;
+  const logicalW = 380 * zoom;
   if (Math.abs(fromH - toH) < 1) return;
 
   const start = performance.now();
@@ -51,7 +55,7 @@ export async function animatePanelHeight(toH: number, durationMs = 260): Promise
       if (myId !== currentAnimId) { resolve(); return; }
       const t = Math.min(1, (now - start) / durationMs);
       const logicalH = fromH + (toH - fromH) * easeOut(t);
-      win.setSize(new LogicalSize(380, logicalH));
+      win.setSize(new LogicalSize(logicalW, logicalH));
       win.outerSize().then((s) => {
         if (myId !== currentAnimId) return; // 异步回调里再检查一次
         win.setPosition(new PhysicalPosition(pos.x, bottomPx - s.height));
@@ -68,10 +72,11 @@ export async function animatePanelHeight(toH: number, durationMs = 260): Promise
 
 /**
  * 动画化窗口宽高，保持右下角固定（宽度变化时往左扩展，高度变化时往上收缩）。
+ * 接收设计尺寸 designW/designH，目标逻辑尺寸 = 设计 × zoom（方案 B）。
  * 用 easeOut 曲线，和 animatePanelHeight 视觉语言一致。
  * 可中断：若启动时已有动画进行中，旧动画的 tick 自行停止。
  */
-export async function animatePanelSize(toW: number, toH: number, durationMs = 260): Promise<void> {
+export async function animatePanelSize(designW: number, designH: number, durationMs = 260, zoom = 1): Promise<void> {
   const myId = ++currentAnimId;
   const win = getCurrentWindow();
   const pos = await win.outerPosition();
@@ -81,6 +86,8 @@ export async function animatePanelSize(toW: number, toH: number, durationMs = 26
   const bottomPx = pos.y + size.height;
   const fromW = size.width / factor;
   const fromH = size.height / factor;
+  const toW = designW * zoom;
+  const toH = designH * zoom;
   if (Math.abs(fromW - toW) < 1 && Math.abs(fromH - toH) < 1) return;
 
   const start = performance.now();

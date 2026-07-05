@@ -142,14 +142,12 @@ pub fn reorder_phrases(state: State<AppState>, ids: Vec<String>) -> Result<(), S
 pub fn reposition_panel(app: tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("panel") {
         let sz = win.outer_size().unwrap_or_default();
-        let factor = win.scale_factor().unwrap_or(1.0);
-        let logical_w = (sz.width as f64 / factor) as i32;
-        let logical_h = (sz.height as f64 / factor) as i32;
-        if let Some((x, y)) = crate::compute_panel_position(logical_w, logical_h) {
-            let _ = win.set_position(PhysicalPosition::new(
-                (x as f64 * factor) as i32,
-                (y as f64 * factor) as i32,
-            ));
+        // outer_size 是物理像素，compute_panel_position 接收物理像素，直接传入
+        if let Some((x, y)) = crate::compute_panel_position(
+            sz.width as i32,
+            sz.height as i32,
+        ) {
+            let _ = win.set_position(PhysicalPosition::new(x, y));
         }
     }
 }

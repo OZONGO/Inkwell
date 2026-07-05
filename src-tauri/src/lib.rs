@@ -8,27 +8,67 @@ mod settings;
 mod state;
 
 use std::str::FromStr;
-use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition};
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
-use windows::Win32::Foundation::POINT;
+use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MONITOR_DEFAULTTONEAREST, MONITORINFO,
 };
 use windows::Win32::UI::Shell::{ABM_GETTASKBARPOS, APPBARDATA, SHAppBarMessage};
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-/// 读取当前显示模式对应的面板尺寸 (width, height)
-/// stack → 380×320，flow → 380×615；读设置失败时回退 stack 尺寸
-fn panel_size_for_mode(app: &tauri::AppHandle) -> (i32, i32) {
-    let state = app.state::<state::AppState>();
-    let conn = state.db.lock();
-    let mode = crate::db::get_display_mode(&conn).unwrap_or_else(|_| "stack".to_string());
-    match mode.as_str() {
-        "flow" => (380, 615),
-        _ => (380, 320),
+// 面板物理尺寸占鼠标所在显示器物理工作区的比例。
+// 锚定 1920×1080 屏幕（工作区约 1920×1040）下堆叠 380×320、卡片流 380×615：
+// 宽 ≈19.8%、堆叠高 ≈30.8%、卡片流高 ≈59.1%。保证不同缩放下面板物理大小稳定，
+// 不随系统 DPI 缩放膨胀。
+const PANEL_WIDTH_RATIO: f64 = 380.0 / 1920.0;
+const PANEL_STACK_HEIGHT_RATIO: f64 = 320.0 / 1040.0;
+const PANEL_FLOW_HEIGHT_RATIO: f64 = 615.0 / 1040.0;
+
+/// 取鼠标所在显示器的物理工作区与任务栏矩形。
+/// rcWork / APPBARDATA.rc 均为物理像素；任务栏探测失败时任务栏 rc 为全零（按底部处理）。
+unsafe fn cursor_monitor_work() -> Option<(RECT, RECT)> {
+    let mut cursor = POINT { x: 0, y: 0 };
+    if GetCursorPos(&mut cursor).is_err() {
+        return None;
     }
+    let hmon = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+    let mut mi = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !GetMonitorInfoW(hmon, &mut mi).as_bool() {
+        return None;
+    }
+    let mut abd: APPBARDATA = std::mem::zeroed();
+    abd.cbSize = std::mem::size_of::<APPBARDATA>() as u32;
+    let _ = SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd);
+    Some((mi.rcWork, abd.rc))
+}
+
+/// 按显示模式 + 鼠标所在显示器物理工作区，计算面板物理尺寸。
+/// 比例锚定 1920×1080 屏幕：宽 ≈19.8%，堆叠高 ≈30.8%，卡片流高 ≈59.1%。
+/// 取工作区失败时回退堆叠 380×320（按 100% 缩放下的物理值兜底）。
+fn panel_physical_size_for_mode(app: &tauri::AppHandle) -> (i32, i32) {
+    let mode = {
+        let state = app.state::<state::AppState>();
+        let conn = state.db.lock();
+        crate::db::get_display_mode(&conn).unwrap_or_else(|_| "stack".to_string())
+    };
+    let Some((work, _taskbar)) = (unsafe { cursor_monitor_work() }) else {
+        return if mode == "flow" { (380, 615) } else { (380, 320) };
+    };
+    let work_w = (work.right - work.left) as f64;
+    let work_h = (work.bottom - work.top) as f64;
+    let w = (work_w * PANEL_WIDTH_RATIO) as i32;
+    let h = if mode == "flow" {
+        (work_h * PANEL_FLOW_HEIGHT_RATIO) as i32
+    } else {
+        (work_h * PANEL_STACK_HEIGHT_RATIO) as i32
+    };
+    (w, h)
 }
 
 fn toggle_panel(app: &tauri::AppHandle) {
@@ -38,11 +78,11 @@ fn toggle_panel(app: &tauri::AppHandle) {
                 let _ = win.hide();
             }
             _ => {
-                // 按当前显示模式决定面板尺寸（覆盖上次 grid 等遗留尺寸），
+                // 按屏幕工作区比例算物理尺寸（覆盖上次 grid 等遗留尺寸），
                 // 再定位到鼠标所在显示器的工作区角落（避开任务栏）。
                 // 粘贴目标窗口由 foreground_tracker 后台线程持续记录，无需在此捕获
-                let (w, h) = panel_size_for_mode(app);
-                let _ = win.set_size(LogicalSize::new(w as f64, h as f64));
+                let (w, h) = panel_physical_size_for_mode(app);
+                let _ = win.set_size(PhysicalSize::new(w as f64, h as f64));
                 if let Some((x, y)) = compute_panel_position(w, h) {
                     let _ = win.set_position(PhysicalPosition::new(x, y));
                 }
@@ -73,28 +113,13 @@ fn toggle_settings(app: &tauri::AppHandle) {
     }
 }
 
-/// 计算面板位置：取鼠标所在显示器的工作区，按任务栏边定位面板到角落
+/// 计算面板位置：取鼠标所在显示器的工作区，按任务栏边定位面板到角落。
+///
+/// `panel_width` / `panel_height` 为**物理像素**，与 rcWork / APPBARDATA.rc
+/// （均为物理像素）对齐计算，返回**物理像素**坐标，可直接用于 `PhysicalPosition`。
 pub(crate) fn compute_panel_position(panel_width: i32, panel_height: i32) -> Option<(i32, i32)> {
     unsafe {
-        let mut cursor = POINT { x: 0, y: 0 };
-        if GetCursorPos(&mut cursor).is_err() {
-            return None;
-        }
-        let hmon = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if !GetMonitorInfoW(hmon, &mut mi).as_bool() {
-            return None;
-        }
-        let work = mi.rcWork;
-
-        // 探测任务栏位置（失败则按底部处理）
-        let mut abd: APPBARDATA = std::mem::zeroed();
-        abd.cbSize = std::mem::size_of::<APPBARDATA>() as u32;
-        let _ = SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd);
-        let taskbar = abd.rc;
+        let (work, taskbar) = cursor_monitor_work()?;
 
         // 根据任务栏所在边定位面板到工作区角落
         let (x, y) = if taskbar.top == 0 && taskbar.bottom < work.bottom {
@@ -135,8 +160,8 @@ pub fn run() {
                             // Alt+C：面板隐藏时先显示再开搜索
                             if let Some(win) = app.get_webview_window("panel") {
                                 if !win.is_visible().unwrap_or(false) {
-                                    let (w, h) = panel_size_for_mode(app);
-                                    let _ = win.set_size(LogicalSize::new(w as f64, h as f64));
+                                    let (w, h) = panel_physical_size_for_mode(app);
+                                    let _ = win.set_size(PhysicalSize::new(w as f64, h as f64));
                                     if let Some((x, y)) = compute_panel_position(w, h) {
                                         let _ = win.set_position(PhysicalPosition::new(x, y));
                                     }
